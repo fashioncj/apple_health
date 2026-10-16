@@ -6,10 +6,14 @@ on:
       version:
         description: App Store version for this upload
         required: true
-        default: "1.0"
+        default: "1.0.1"
       build_number:
         description: Build number. Defaults to the GitHub run number when blank.
         required: false
+      export_only:
+        description: Export a signed IPA artifact without uploading it to TestFlight
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,7 +38,7 @@ jobs:
           [[ -n "$APP_STORE_CONNECT_API_PRIVATE_KEY" ]] || { echo "::error::Missing APP_STORE_CONNECT_API_PRIVATE_KEY secret."; exit 1; }
 
   upload:
-    name: Archive and upload to TestFlight
+    name: Test and prepare TestFlight build
     needs: validate
     runs-on: macos-26
     timeout-minutes: 60
@@ -45,6 +49,7 @@ jobs:
       APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
       APP_STORE_CONNECT_API_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
       TEAM_ID: 9UR77TD484
+      EXPORT_DESTINATION: ${{ inputs.export_only && 'export' || 'upload' }}
 
     steps:
       - name: Check out repository
@@ -78,6 +83,20 @@ jobs:
           echo "DERIVED_DATA_PATH=$RUNNER_TEMP/DerivedData" >> "$GITHUB_ENV"
           echo "EXPORT_PATH=$RUNNER_TEMP/HealthSync-export" >> "$GITHUB_ENV"
 
+      - name: Run iOS regression suite
+        run: |
+          set -euo pipefail
+
+          SIMULATOR_ID="$(xcrun simctl list devices available --json | python3 -c 'import json,sys; print(next(device["udid"] for devices in json.load(sys.stdin)["devices"].values() for device in devices if device["isAvailable"] and device["name"].startswith("iPhone")))')"
+          xcodebuild test \
+            -project HealthSync.xcodeproj \
+            -scheme HealthSync \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -derivedDataPath "$RUNNER_TEMP/TestDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/HealthSync-tests.xcresult" \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Write App Store Connect API key
         run: |
           set -euo pipefail
@@ -99,7 +118,7 @@ jobs:
           fi
 
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
-          echo "Uploading HealthSync $APP_VERSION ($BUILD_NUMBER)"
+          echo "Preparing HealthSync $APP_VERSION ($BUILD_NUMBER), destination: $EXPORT_DESTINATION"
 
       - name: Archive HealthSync
         run: |
@@ -126,13 +145,13 @@ jobs:
           set -euo pipefail
 
           /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" "$RUNNER_TEMP/ExportOptions.plist"
-          /usr/libexec/PlistBuddy -c "Add :destination string upload" "$RUNNER_TEMP/ExportOptions.plist"
+          /usr/libexec/PlistBuddy -c "Add :destination string $EXPORT_DESTINATION" "$RUNNER_TEMP/ExportOptions.plist"
           /usr/libexec/PlistBuddy -c "Add :teamID string $TEAM_ID" "$RUNNER_TEMP/ExportOptions.plist"
           /usr/libexec/PlistBuddy -c "Add :signingStyle string automatic" "$RUNNER_TEMP/ExportOptions.plist"
           /usr/libexec/PlistBuddy -c "Add :uploadSymbols bool true" "$RUNNER_TEMP/ExportOptions.plist"
           /usr/libexec/PlistBuddy -c "Add :manageAppVersionAndBuildNumber bool false" "$RUNNER_TEMP/ExportOptions.plist"
 
-      - name: Upload to TestFlight
+      - name: Export signed build
         run: |
           set -euo pipefail
 
@@ -161,6 +180,7 @@ jobs:
         with:
           name: testflight-diagnostics
           path: |
+            ${{ runner.temp }}/HealthSync-tests.xcresult
             ${{ runner.temp }}/ExportOptions.plist
             ${{ runner.temp }}/HealthSync-export
             ${{ runner.temp }}/distribution-logs

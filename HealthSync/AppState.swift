@@ -164,6 +164,7 @@ final class AppState: ObservableObject {
 
     private var store: SQLiteLocalStore?
     private var syncEngine: SyncEngine?
+    private var incrementalSyncRunner: IncrementalSyncRunner?
     private let healthKit = HealthKitManager()
     private let normalizer = HealthNormalizer()
     private let keychain = KeychainStore()
@@ -192,6 +193,7 @@ final class AppState: ObservableObject {
             let localStore = try SQLiteLocalStore()
             store = localStore
             syncEngine = SyncEngine(store: localStore)
+            incrementalSyncRunner = IncrementalSyncRunner(store: localStore, reader: healthKit)
             settings = try await localStore.loadSettings()
             hasStoredToken = try DevelopmentKeychainBypass.hasStoredToken {
                 try hasTokenForCurrentStorageMode()
@@ -449,50 +451,11 @@ final class AppState: ObservableObject {
     }
 
     private func syncIncrementalThrowing() async throws {
-        guard let store, let syncEngine else { throw APIClientError.invalidResponse }
+        guard let incrementalSyncRunner else { throw APIClientError.invalidResponse }
         try Task.checkCancellation()
         try await ensureHealthPermissionsRequested()
         let configuration = try await uploadConfiguration()
-        var anchors: [HealthDataType: String] = [:]
-        for type in settings.selectedTypes {
-            if let anchor = try await store.loadAnchor(for: type) {
-                anchors[type] = anchor
-            }
-        }
-
-        let result: HealthKitIncrementalResult
-        do {
-            result = try await healthKit.fetchIncremental(types: settings.selectedTypes, anchors: anchors)
-        } catch {
-            // HealthKit and network availability fail independently; still retry durable queued work.
-            _ = await syncEngine.uploadPending(configuration: configuration)
-            throw error
-        }
-        try Task.checkCancellation()
-        if !result.fetchResult.isEmpty || !result.deletions.isEmpty {
-            let now = Date()
-            let payload = try normalizer.payload(
-                deviceID: try await store.deviceID(),
-                dateRange: SyncDateRange(start: now, end: now),
-                timezone: TimeZone.current.identifier,
-                quantitySamples: result.fetchResult.quantitySamples,
-                sleepSamples: result.fetchResult.sleepSamples,
-                categorySamples: result.fetchResult.categorySamples,
-                workoutSamples: result.fetchResult.workoutSamples,
-                deletions: result.deletions
-            )
-            _ = try await syncEngine.queue(payload: payload)
-        } else {
-            try await store.appendLog(SyncLogEntry(level: .info, message: HealthSyncUserMessages.noNewSamplesFound))
-        }
-
-        // Anchors advance only after every addition/deletion is durably queued.
-        for (type, anchor) in result.anchors {
-            try await store.saveAnchor(anchor, for: type)
-        }
-
-        let uploadResult = await syncEngine.uploadPending(configuration: configuration)
-        try BackfillSync.validateUpload(uploadResult)
+        try await incrementalSyncRunner.run(types: settings.selectedTypes, configuration: configuration)
         await refresh()
     }
 

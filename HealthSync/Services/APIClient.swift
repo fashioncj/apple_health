@@ -209,6 +209,7 @@ final class APIClient: SyncUploading {
 
         var lastTransientError: APIClientError = .transientFailure("Network unavailable or server temporarily unavailable.")
         for attempt in 0..<maxAttempts {
+            try Task.checkCancellation()
             do {
                 let (data, response) = try await session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -234,6 +235,8 @@ final class APIClient: SyncUploading {
                         try await sleepBeforeRetry(attempt: attempt)
                     }
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch let error as APIClientError {
                 switch error {
                 case .authRejected, .serverRejected, .invalidBackendURL, .missingBackendURL, .missingToken, .invalidResponse:
@@ -245,6 +248,7 @@ final class APIClient: SyncUploading {
                     }
                 }
             } catch let error as URLError {
+                if error.code == .cancelled { throw CancellationError() }
                 lastTransientError = .transientFailure(Self.networkFailureMessage(for: error))
                 if attempt < maxAttempts - 1 {
                     try await sleepBeforeRetry(attempt: attempt)

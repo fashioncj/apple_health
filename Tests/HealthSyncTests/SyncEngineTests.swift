@@ -113,6 +113,33 @@ final actor PausingUploader: SyncUploading {
 }
 
 final class SyncEngineTests: XCTestCase {
+    func testNegativeAcknowledgementKeepsBatchQueued() async throws {
+        let store = SyncEngineTestsStore()
+        let engine = SyncEngine(store: store, uploader: NegativeAcknowledgementUploader())
+        let batch = try await engine.queue(payload: .empty(deviceID: "device", dateRange: SyncDateRange(start: .distantPast, end: .distantPast), timezone: "UTC"))
+        let result = await engine.uploadPending(configuration: UploadConfiguration(baseURL: "https://example.com", token: "token", deviceID: "device", appVersion: "1.0"))
+        let pending = try await store.pendingBatches()
+        XCTAssertEqual(result.failedCount, 1)
+        XCTAssertEqual(pending.map(\.id), [batch.id])
+    }
+
+    func testCancellationStopsBeforeAttemptingQueuedBatches() async throws {
+        let store = SyncEngineTestsStore()
+        let uploader = SucceedingUploader()
+        let engine = SyncEngine(store: store, uploader: uploader)
+        _ = try await engine.queue(payload: .empty(deviceID: "device", dateRange: SyncDateRange(start: .distantPast, end: .distantPast), timezone: "UTC"))
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await engine.uploadPending(configuration: UploadConfiguration(baseURL: "https://example.com", token: "token", deviceID: "device", appVersion: "1.0"))
+        }
+        _ = await task.value
+        let uploadedIDs = await uploader.uploadedIDs
+        let pending = try await store.pendingBatches()
+        XCTAssertTrue(uploadedIDs.isEmpty)
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(pending.first?.attemptCount, 0)
+    }
+
     func testBusyOperationRejectsSecondStart() {
         XCTAssertTrue(BusyOperation.canStart(isBusy: false))
         XCTAssertFalse(BusyOperation.canStart(isBusy: true))
@@ -269,6 +296,12 @@ final class SyncEngineTests: XCTestCase {
     }
 }
 
+private actor NegativeAcknowledgementUploader: SyncUploading {
+    func upload(batch: SyncBatch, configuration: UploadConfiguration) async throws -> UploadResult {
+        UploadResult(ok: false, received: 0, duplicates: 0)
+    }
+}
+
 final class BackfillSyncTests: XCTestCase {
     func testLargeBackfillPayloadSplitsIntoServerSizedUploads() {
         let start = Date(timeIntervalSince1970: 0)
@@ -379,5 +412,221 @@ final actor WorkspaceIdentifyingUploader: SyncUploading {
             workspaceID: "wk_test",
             exportID: batch.payload.exportID.uuidString
         )
+    }
+}
+
+private actor MaintenanceHealthReader: HealthKitSyncReading {
+    var incremental: HealthKitIncrementalResult
+    var raw: HealthKitFetchResult = .empty
+    var readError = false
+    private(set) var rawRequests: [(Set<HealthDataType>, Date, Date)] = []
+    private(set) var receivedAnchors: [[HealthDataType: String]] = []
+
+    init(incremental: HealthKitIncrementalResult = HealthKitIncrementalResult(fetchResult: .empty, anchors: [:], deletions: [])) {
+        self.incremental = incremental
+    }
+
+    func setRaw(_ result: HealthKitFetchResult, fail: Bool = false) {
+        raw = result
+        readError = fail
+    }
+
+    func fetchIncremental(types: Set<HealthDataType>, anchors: [HealthDataType: String]) async throws -> HealthKitIncrementalResult {
+        receivedAnchors.append(anchors)
+        let result = incremental
+        incremental = HealthKitIncrementalResult(fetchResult: .empty, anchors: [:], deletions: [])
+        return result
+    }
+
+    func fetchSamples(types: Set<HealthDataType>, start: Date, end: Date) async throws -> HealthKitFetchResult {
+        rawRequests.append((types, start, end))
+        if readError { throw URLError(.notConnectedToInternet) }
+        return raw
+    }
+}
+
+private actor MaintenanceUploader: SyncUploading {
+    private(set) var payloads: [SyncPayload] = []
+    let fails: Bool
+    init(fails: Bool = false) { self.fails = fails }
+
+    func upload(batch: SyncBatch, configuration: UploadConfiguration) async throws -> UploadResult {
+        payloads.append(batch.payload)
+        if fails { throw URLError(.timedOut) }
+        return UploadResult(ok: true, received: batch.payload.metrics.count + batch.payload.workouts.count, duplicates: 0)
+    }
+}
+
+final class IncrementalMaintenanceTests: XCTestCase {
+    private let configuration = UploadConfiguration(baseURL: "https://example.com", token: "token", deviceID: "existing-device", appVersion: "1.0.1")
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+    private let now = Date(timeIntervalSince1970: 1_792_166_400)
+
+    private func databaseURL() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("Maintenance-\(UUID()).sqlite")
+    }
+
+    private func samples(_ count: Int) -> HealthKitFetchResult {
+        HealthKitFetchResult(quantitySamples: (0..<count).map { index in
+            HealthQuantitySampleDTO(uuid: UUID(), type: .stepCount, value: Double(index), unit: .count,
+                startAt: now.addingTimeInterval(-60), endAt: now, sourceName: "Mi Fitness",
+                sourceBundleIdentifier: "com.example.fitness", metadata: [:])
+        }, categorySamples: [], sleepSamples: [], workoutSamples: [])
+    }
+
+    func testFreshDeletionSuppressesOldAdditionWhileRetainingUnrelatedQueuedData() async throws {
+        let url = databaseURL()
+        let store = try SQLiteLocalStore(url: url)
+        let oldSamples = samples(2)
+        let oldPayload = try HealthNormalizer().payload(deviceID: configuration.deviceID,
+            dateRange: SyncDateRange(start: now, end: now), timezone: "UTC",
+            quantitySamples: oldSamples.quantitySamples, sleepSamples: [], workoutSamples: [])
+        try await store.enqueueBatch(SyncBatch(payload: oldPayload, attemptCount: 2))
+        let deletedID = oldPayload.metrics[0].id
+        let reader = MaintenanceHealthReader(incremental: HealthKitIncrementalResult(fetchResult: .empty,
+            anchors: [.heartRate: "after-delete"], deletions: [HealthRecordDeletion(id: deletedID, kind: .metric)]))
+        do {
+            try await IncrementalSyncRunner(store: store, reader: reader, uploader: MaintenanceUploader(fails: true))
+                .run(types: [.heartRate], configuration: configuration, now: now, calendar: calendar)
+            XCTFail("The failed deletion must remain queued")
+        } catch {}
+        let reopened = try SQLiteLocalStore(url: url)
+        let pending = try await reopened.pendingBatches()
+        XCTAssertFalse(pending.flatMap { $0.payload.metrics }.contains { $0.id == deletedID })
+        XCTAssertTrue(pending.flatMap { $0.payload.metrics }.contains { $0.id == oldPayload.metrics[1].id })
+        XCTAssertEqual(pending.flatMap { $0.payload.deletions }.map(\.id), [deletedID])
+        let uploader = MaintenanceUploader()
+        try await IncrementalSyncRunner(store: reopened, reader: MaintenanceHealthReader(), uploader: uploader)
+            .run(types: [.heartRate], configuration: configuration, now: now, calendar: calendar)
+        let retried = await uploader.payloads
+        XCTAssertFalse(retried.flatMap(\.metrics).contains { $0.id == deletedID })
+        let remaining = try await reopened.pendingBatches()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testNewerSampleCannotBeOverwrittenByAnOlderPendingSnapshot() async throws {
+        let store = try SQLiteLocalStore(url: databaseURL())
+        let old = samples(1).quantitySamples[0]
+        let oldPayload = try HealthNormalizer().payload(deviceID: configuration.deviceID,
+            dateRange: SyncDateRange(start: now, end: now), timezone: "UTC", quantitySamples: [old], sleepSamples: [], workoutSamples: [])
+        try await store.enqueueBatch(SyncBatch(payload: oldPayload, attemptCount: 2))
+        let newer = HealthQuantitySampleDTO(uuid: old.uuid, type: old.type, value: 999, unit: old.unit,
+            startAt: old.startAt, endAt: old.endAt, sourceName: old.sourceName,
+            sourceBundleIdentifier: old.sourceBundleIdentifier, metadata: [:])
+        let reader = MaintenanceHealthReader(incremental: HealthKitIncrementalResult(
+            fetchResult: HealthKitFetchResult(quantitySamples: [newer], categorySamples: [], sleepSamples: [], workoutSamples: []),
+            anchors: [:], deletions: []))
+        let uploader = MaintenanceUploader()
+        try await IncrementalSyncRunner(store: store, reader: reader, uploader: uploader)
+            .run(types: [.heartRate], configuration: configuration, now: now, calendar: calendar)
+        let payloads = await uploader.payloads
+        XCTAssertEqual(payloads.flatMap(\.metrics).map(\.value), [999])
+    }
+
+    func testFreshIncrementalIsChunkedBeforeStaleRetryAndAnchorsSurviveRestart() async throws {
+        let url = databaseURL()
+        let store = try SQLiteLocalStore(url: url)
+        let stale = SyncBatch(payload: .empty(deviceID: configuration.deviceID, dateRange: SyncDateRange(start: .distantPast, end: .distantPast), timezone: "UTC"), attemptCount: 2)
+        try await store.enqueueBatch(stale)
+        let reader = MaintenanceHealthReader(incremental: HealthKitIncrementalResult(fetchResult: samples(205), anchors: [.stepCount: "new-anchor"], deletions: [HealthRecordDeletion(id: "healthkit:deleted", kind: .metric)]))
+        let uploader = MaintenanceUploader()
+        let runner = IncrementalSyncRunner(store: store, reader: reader, uploader: uploader)
+        try await runner.run(types: [.stepCount], configuration: configuration, now: now, calendar: calendar)
+        let payloads = await uploader.payloads
+        XCTAssertEqual(payloads.prefix(3).map(\.metrics.count), [100, 100, 5])
+        XCTAssertEqual(payloads[3].deletions.count, 1)
+        XCTAssertEqual(payloads.last?.exportID, stale.payload.exportID)
+        XCTAssertTrue(payloads.allSatisfy { $0.metrics.count + $0.workouts.count + $0.deletions.count <= 100 })
+        let reopened = try SQLiteLocalStore(url: url)
+        let anchor = try await reopened.loadAnchor(for: .stepCount)
+        let pending = try await reopened.pendingBatches()
+        XCTAssertEqual(anchor, "new-anchor")
+        XCTAssertTrue(pending.isEmpty)
+    }
+
+    func testTimeoutKeepsEveryChunkAndReplaysSameExportAfterRestart() async throws {
+        let url = databaseURL()
+        let store = try SQLiteLocalStore(url: url)
+        let reader = MaintenanceHealthReader(incremental: HealthKitIncrementalResult(fetchResult: samples(205), anchors: [.heartRate: "saved-anchor"], deletions: []))
+        let failing = MaintenanceUploader(fails: true)
+        do {
+            try await IncrementalSyncRunner(store: store, reader: reader, uploader: failing).run(types: [.heartRate], configuration: configuration, now: now, calendar: calendar)
+            XCTFail("A timed-out upload must remain visibly unsuccessful")
+        } catch {}
+        let attempted = await failing.payloads
+        let pending = try await store.pendingBatches()
+        XCTAssertEqual(attempted.count, 1)
+        XCTAssertEqual(pending.count, 3)
+        XCTAssertEqual(pending.reduce(0) { $0 + $1.payload.metrics.count }, 205)
+        let reopened = try SQLiteLocalStore(url: url)
+        let succeeding = MaintenanceUploader()
+        let resumedReader = MaintenanceHealthReader()
+        try await IncrementalSyncRunner(store: reopened, reader: resumedReader, uploader: succeeding).run(types: [.heartRate], configuration: configuration, now: now, calendar: calendar)
+        let replayed = await succeeding.payloads
+        let receivedAnchors = await resumedReader.receivedAnchors
+        let remaining = try await reopened.pendingBatches()
+        XCTAssertTrue(replayed.contains { $0.exportID == attempted.first?.exportID })
+        XCTAssertEqual(receivedAnchors.first?[.heartRate], "saved-anchor")
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testRollingReadPreservesSourceAndRunsOncePerLocalDayAcrossRestart() async throws {
+        let url = databaseURL()
+        let store = try SQLiteLocalStore(url: url)
+        let reader = MaintenanceHealthReader()
+        let raw = samples(1)
+        await reader.setRaw(raw)
+        let uploader = MaintenanceUploader()
+        try await IncrementalSyncRunner(store: store, reader: reader, uploader: uploader).run(types: [.stepCount, .sleepAnalysis, .workouts, .heartRate], configuration: configuration, now: now, calendar: calendar)
+        let reopened = try SQLiteLocalStore(url: url)
+        let runner = IncrementalSyncRunner(store: reopened, reader: reader, uploader: uploader)
+        try await runner.run(types: [.stepCount, .sleepAnalysis, .workouts, .heartRate], configuration: configuration, now: now.addingTimeInterval(3600), calendar: calendar)
+        let requests = await reader.rawRequests
+        let sent = await uploader.payloads
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.0, [.stepCount, .sleepAnalysis, .workouts])
+        XCTAssertEqual(requests.first?.1, calendar.date(byAdding: .day, value: -3, to: calendar.startOfDay(for: now)))
+        XCTAssertEqual(sent.first?.metrics.first?.id, "healthkit:\(raw.quantitySamples[0].uuid.uuidString)")
+        XCTAssertEqual(sent.first?.metrics.first?.sourceName, "Mi Fitness")
+        XCTAssertEqual(sent.first?.metrics.first?.sourceBundleID, "com.example.fitness")
+        try await runner.run(types: [.stepCount], configuration: configuration, now: calendar.date(byAdding: .day, value: 1, to: now)!, calendar: calendar)
+        let nextRequests = await reader.rawRequests
+        XCTAssertEqual(nextRequests.count, 2)
+    }
+
+    func testFailedReconciliationDoesNotRepeatOnEveryWake() async throws {
+        let store = try SQLiteLocalStore(url: databaseURL())
+        let reader = MaintenanceHealthReader()
+        await reader.setRaw(.empty, fail: true)
+        let runner = IncrementalSyncRunner(store: store, reader: reader, uploader: MaintenanceUploader())
+        do {
+            try await runner.run(types: [.stepCount], configuration: configuration, now: now, calendar: calendar)
+            XCTFail("Read error must be surfaced")
+        } catch {}
+        try await runner.run(types: [.stepCount], configuration: configuration, now: now.addingTimeInterval(3600), calendar: calendar)
+        let requests = await reader.rawRequests
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testStaleBacklogAttemptsOnlyOneBatchPerDay() async throws {
+        let store = try SQLiteLocalStore(url: databaseURL())
+        for index in 0..<3 {
+            try await store.enqueueBatch(SyncBatch(payload: .empty(deviceID: configuration.deviceID, dateRange: SyncDateRange(start: now, end: now), timezone: "UTC"), createdAt: now.addingTimeInterval(Double(index)), attemptCount: 2))
+        }
+        let reader = MaintenanceHealthReader()
+        let uploader = MaintenanceUploader(fails: true)
+        let runner = IncrementalSyncRunner(store: store, reader: reader, uploader: uploader)
+        do { try await runner.run(types: [.heartRate], configuration: configuration, now: now, calendar: calendar) } catch {}
+        try await runner.run(types: [.heartRate], configuration: configuration, now: now.addingTimeInterval(3600), calendar: calendar)
+        let firstDay = await uploader.payloads
+        XCTAssertEqual(firstDay.count, 1)
+        do { try await runner.run(types: [.heartRate], configuration: configuration, now: calendar.date(byAdding: .day, value: 1, to: now)!, calendar: calendar) } catch {}
+        let nextDay = await uploader.payloads
+        XCTAssertEqual(nextDay.count, 2)
+        XCTAssertNotEqual(nextDay[0].exportID, nextDay[1].exportID)
     }
 }

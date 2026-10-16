@@ -66,6 +66,41 @@ actor SQLiteLocalStore: BatchPersisting {
     }
 
     func enqueueBatch(_ batch: SyncBatch) async throws {
+        try replaceSupersededRecords(with: batch.payload, batches: [batch])
+    }
+
+    func enqueuePayloadChunks(_ payload: SyncPayload, maxRecords: Int) throws -> [SyncBatch] {
+        let batches = payload.chunked(maxRecords: maxRecords).map { SyncBatch(payload: $0) }
+        try replaceSupersededRecords(with: payload, batches: batches)
+        return batches
+    }
+
+    private func replaceSupersededRecords(with payload: SyncPayload, batches: [SyncBatch]) throws {
+        let metricIDs = Set(payload.metrics.map(\.id))
+            .union(payload.deletions.filter { $0.kind == .metric }.map(\.id))
+        let workoutIDs = Set(payload.workouts.map(\.id))
+            .union(payload.deletions.filter { $0.kind == .workout }.map(\.id))
+        try Self.execute("BEGIN IMMEDIATE", db: db)
+        do {
+            for pending in try readPendingBatches() where pending.payload.deviceID == payload.deviceID {
+                let remaining = pending.payload.excludingRecords(metricIDs: metricIDs, workoutIDs: workoutIDs)
+                guard remaining != pending.payload else { continue }
+                try deleteBatch(id: pending.id)
+                if !remaining.isEmpty {
+                    try insertBatch(SyncBatch(payload: remaining, createdAt: pending.createdAt))
+                }
+            }
+            for batch in batches {
+                try insertBatch(batch)
+            }
+            try Self.execute("COMMIT", db: db)
+        } catch {
+            try? Self.execute("ROLLBACK", db: db)
+            throw error
+        }
+    }
+
+    private func insertBatch(_ batch: SyncBatch) throws {
         let payloadData = try PayloadJSON.encoder.encode(batch.payload)
         guard let payloadJSON = String(data: payloadData, encoding: .utf8) else {
             throw SQLiteStoreError.encodingFailed
@@ -94,11 +129,15 @@ actor SQLiteLocalStore: BatchPersisting {
     }
 
     func pendingBatches() async throws -> [SyncBatch] {
+        try readPendingBatches()
+    }
+
+    private func readPendingBatches(oldestFirst: Bool = false) throws -> [SyncBatch] {
         let sql = """
         SELECT id, payload_json, created_at, uploaded_at, attempt_count, last_error
         FROM batches
         WHERE uploaded_at IS NULL
-        ORDER BY created_at ASC
+        ORDER BY \(oldestFirst ? "created_at ASC, rowid ASC" : "attempt_count ASC, created_at ASC, rowid ASC")
         """
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
@@ -108,6 +147,71 @@ actor SQLiteLocalStore: BatchPersisting {
             batches.append(try readBatch(from: statement))
         }
         return batches
+    }
+
+    func splitOversizedPendingBatches(maxRecords: Int) throws {
+        try normalizePendingRecords()
+        for batch in try readPendingBatches() {
+            let chunks = batch.payload.chunked(maxRecords: maxRecords)
+            guard chunks.count > 1 else { continue }
+            try Self.execute("BEGIN IMMEDIATE", db: db)
+            do {
+                for payload in chunks {
+                    try insertBatch(SyncBatch(payload: payload, createdAt: batch.createdAt))
+                }
+                try deleteBatch(id: batch.id)
+                try Self.execute("COMMIT", db: db)
+            } catch {
+                try? Self.execute("ROLLBACK", db: db)
+                throw error
+            }
+        }
+    }
+
+    private func normalizePendingRecords() throws {
+        try Self.execute("BEGIN IMMEDIATE", db: db)
+        do {
+            var metricIDs: [String: Set<String>] = [:]
+            var workoutIDs: [String: Set<String>] = [:]
+            for batch in try readPendingBatches(oldestFirst: true).reversed() {
+                let device = batch.payload.deviceID
+                let remaining = batch.payload.excludingRecords(metricIDs: metricIDs[device, default: []], workoutIDs: workoutIDs[device, default: []])
+                metricIDs[device, default: []].formUnion(batch.payload.metrics.map(\.id))
+                workoutIDs[device, default: []].formUnion(batch.payload.workouts.map(\.id))
+                for deletion in batch.payload.deletions {
+                    if deletion.kind == .metric {
+                        metricIDs[device, default: []].insert(deletion.id)
+                    } else {
+                        workoutIDs[device, default: []].insert(deletion.id)
+                    }
+                }
+                guard remaining != batch.payload else { continue }
+                try deleteBatch(id: batch.id)
+                if !remaining.isEmpty {
+                    try insertBatch(SyncBatch(payload: remaining, createdAt: batch.createdAt))
+                }
+            }
+            try Self.execute("COMMIT", db: db)
+        } catch {
+            try? Self.execute("ROLLBACK", db: db)
+            throw error
+        }
+    }
+
+    func claimDailyMaintenance(_ key: String, now: Date, calendar: Calendar) throws -> Bool {
+        let settingKey = "maintenance_\(key)_attempted_at"
+        if let previous = try dateSetting(settingKey), previous >= calendar.startOfDay(for: now) {
+            return false
+        }
+        try upsertSetting(key: settingKey, value: String(now.timeIntervalSince1970))
+        return true
+    }
+
+    private func deleteBatch(id: UUID) throws {
+        let statement = try prepare("DELETE FROM batches WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        try bindText(id.uuidString, to: statement, at: 1)
+        try stepDone(statement)
     }
 
     func markBatchUploaded(id: UUID, result: UploadResult) async throws {
