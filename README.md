@@ -6,6 +6,8 @@ There is no iCloud or server-side Apple Health REST API. Apple Health reads happ
 
 Website: https://healthysync.megabyte.sh
 
+User documentation: https://healthysync.megabyte.sh/docs
+
 Apple Health app sync guide: https://healthysync.megabyte.sh/apple-health-app-sync
 
 Privacy policy: https://healthysync.megabyte.sh/privacy

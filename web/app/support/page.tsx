@@ -102,6 +102,7 @@ export default function SupportPage() {
         <nav aria-label="Page">
           <a href="/">Home</a>
           <a href="/apple-health-app-sync">Sync guide</a>
+          <a href="/docs">Docs</a>
           <a href="/privacy">Privacy</a>
         </nav>
       </header>
@@ -205,12 +206,11 @@ export default function SupportPage() {
 
       <section className="resource-cta" aria-labelledby="guide-title">
         <div className="resource-shell">
-          <h2 id="guide-title">Review the Apple Health sync guide.</h2>
+          <h2 id="guide-title">Set up your server or agent.</h2>
           <p>
-            The guide explains how HealthSync reads HealthKit data on-device and uploads selected
-            JSON batches to a backend you configure.
+            Follow the documentation for Docker setup, HTTPS, backups, and private agent access.
           </p>
-          <a className="resource-button" href="/apple-health-app-sync">Open sync guide</a>
+          <a className="resource-button" href="/docs">Open documentation</a>
         </div>
       </section>
     </main>

@@ -293,7 +293,7 @@ export default function Home() {
           <a href="/apple-health-app-sync">Sync guide</a>
           <a href="/privacy">Privacy</a>
           <a href="/support">Support</a>
-          <a href="#faq">FAQ</a>
+          <a href="/docs">Docs</a>
           <a className="nav-action" href={APP_STORE_URL}>View on the App Store</a>
         </nav>
       </header>

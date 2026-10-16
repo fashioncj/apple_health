@@ -8,6 +8,12 @@ Public URLs:
 - App Store: https://apps.apple.com/in/app/healthysync/id6776575569
 - Privacy policy: https://healthysync.megabyte.sh/privacy
 - Support: https://healthysync.megabyte.sh/support
+- Documentation: https://healthysync.megabyte.sh/docs
+- Agent documentation index: https://healthysync.megabyte.sh/llms.txt
+
+Documentation content lives in `lib/docs.ts`. The HTML guides under `/docs/<slug>` and
+Markdown versions under `/docs/<slug>/index.md` use the same source. Add guides there
+to include them in documentation navigation, the sitemap, and `llms.txt`.
 
 ## Run locally
 

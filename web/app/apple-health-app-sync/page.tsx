@@ -87,7 +87,7 @@ export default function AppleHealthAppSyncPage() {
           <a href="#how-it-works">How it works</a>
           <a href="/privacy">Privacy</a>
           <a href="/support">Support</a>
-          <a href="#use-cases">Use cases</a>
+          <a href="/docs">Docs</a>
           <a href="/apple-health-sync-alternatives">Alternatives</a>
         </nav>
       </header>
