@@ -5,7 +5,8 @@ const navLinks = [
   { href: "/#features", label: "Features" },
   { href: "/#how-it-works", label: "How it works" },
   { href: "/#developers", label: "Developers" },
-  { href: "/support", label: "Docs & Support" }
+  { href: "/docs", label: "Docs" },
+  { href: "/support", label: "Support" }
 ];
 
 export function SiteHeader() {
@@ -42,7 +43,8 @@ const footerColumns = [
   {
     title: "Resources",
     links: [
-      { href: "/support", label: "Docs & Support" },
+      { href: "/docs", label: "Documentation" },
+      { href: "/support", label: "Support" },
       { href: "/apple-health-app-sync", label: "Apple Health sync guide" },
       { href: "/apple-health-sync-alternatives", label: "Alternatives" },
       { href: GITHUB_URL, label: "Source on GitHub" }

@@ -21,10 +21,10 @@ const toc = [
 
 const quickLinks = [
   {
-    href: "#getting-started",
-    icon: "download",
-    title: "Get started",
-    body: "Install the app and run your first sync."
+    href: "/docs",
+    icon: "book",
+    title: "Setup guides",
+    body: "Step-by-step server and agent guides."
   },
   {
     href: "#api",
@@ -213,8 +213,8 @@ const supportStructuredData = {
 
 function CodeBlock({ title, code }: { title: string; code: string }) {
   return (
-    <div className="docs-code">
-      <div className="docs-code-title">{title}</div>
+    <div className="kb-code">
+      <div className="kb-code-title">{title}</div>
       <pre>
         <code>{code}</code>
       </pre>
@@ -224,24 +224,24 @@ function CodeBlock({ title, code }: { title: string; code: string }) {
 
 export default function SupportPage() {
   return (
-    <main className="lp docs-page">
+    <main className="lp kb-page">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(supportStructuredData) }}
       />
       <SiteHeader />
 
-      <section className="docs-hero" aria-labelledby="docs-title">
+      <section className="kb-hero" aria-labelledby="kb-title">
         <div className="lp-shell">
           <p className="lp-kicker">Docs &amp; Support</p>
-          <h1 id="docs-title">Everything you need to sync Apple Health.</h1>
+          <h1 id="kb-title">Everything you need to sync Apple Health.</h1>
           <p className="lp-lede">
             Guides for setting up HealthSync, running your own backend, understanding the data
             format, and fixing common issues. Still stuck? Email us anytime.
           </p>
-          <div className="docs-quick">
+          <div className="kb-quick">
             {quickLinks.map((link) => (
-              <a className="docs-quick-card" href={link.href} key={link.title}>
+              <a className="kb-quick-card" href={link.href} key={link.title}>
                 <div className="lp-card-icon">
                   <Icon name={link.icon} />
                 </div>
@@ -256,8 +256,8 @@ export default function SupportPage() {
         </div>
       </section>
 
-      <div className="lp-shell docs-layout">
-        <aside className="docs-toc" aria-label="On this page">
+      <div className="lp-shell kb-layout">
+        <aside className="kb-toc" aria-label="On this page">
           <p>On this page</p>
           <ul>
             {toc.map((item) => (
@@ -266,20 +266,20 @@ export default function SupportPage() {
               </li>
             ))}
           </ul>
-          <a className="docs-toc-help" href={`mailto:${CONTACT_EMAIL}`}>
+          <a className="kb-toc-help" href={`mailto:${CONTACT_EMAIL}`}>
             <Icon name="message" />
             Email support
           </a>
         </aside>
 
-        <article className="docs-content">
+        <article className="kb-content">
           <section id="getting-started" aria-labelledby="gs-title">
             <h2 id="gs-title">Getting started</h2>
             <p>
               HealthSync works out of the box with a private hosted workspace, so you can be
               syncing in under a minute. You only need an iPhone with Apple Health.
             </p>
-            <ol className="docs-steps">
+            <ol className="kb-steps">
               {quickStartItems.map((item) => (
                 <li key={item.title}>
                   <strong>{item.title}</strong>
@@ -287,7 +287,7 @@ export default function SupportPage() {
                 </li>
               ))}
             </ol>
-            <div className="docs-callout">
+            <div className="kb-callout">
               <Icon name="shield" />
               <p>
                 HealthSync requests <strong>read-only</strong> HealthKit access. It never writes to
@@ -305,10 +305,10 @@ export default function SupportPage() {
             <p>
               Choose where your data goes. You can switch between modes at any time in Settings.
             </p>
-            <div className="docs-mode-grid">
+            <div className="kb-mode-grid">
               {storageModes.map((mode) => (
-                <div className="docs-mode" key={mode.title}>
-                  <div className="docs-mode-head">
+                <div className="kb-mode" key={mode.title}>
+                  <div className="kb-mode-head">
                     <h3>{mode.title}</h3>
                     <span>{mode.badge}</span>
                   </div>
@@ -333,7 +333,7 @@ export default function SupportPage() {
             </p>
             <CodeBlock title="Terminal" code={selfHostCode} />
             <p>Then, in HealthSync Settings, switch to your own backend and enter:</p>
-            <ul className="docs-list">
+            <ul className="kb-list">
               <li>
                 <strong>Simulator:</strong> <code>http://127.0.0.1:8080</code>
               </li>
@@ -350,8 +350,9 @@ export default function SupportPage() {
             <p>
               For Supabase, Neon, or any managed Postgres, set <code>DATABASE_URL</code>, run{" "}
               <code>alembic upgrade head</code>, and deploy <code>uvicorn backend.main:app</code>.
-              See the{" "}
-              <a href={`${GITHUB_URL}/blob/main/backend/README.md`}>backend README</a> for details.
+              For HTTPS, backups, and upgrades, follow the{" "}
+              <a href="/docs/self-hosting">server setup</a> and{" "}
+              <a href="/docs/operations">server operations</a> guides.
             </p>
           </section>
 
@@ -363,7 +364,7 @@ export default function SupportPage() {
               Environment, Clinical, Reproductive Health, and Symptoms &amp; Events, plus
               Workouts.
             </p>
-            <ul className="docs-list">
+            <ul className="kb-list">
               <li>
                 Every metric and workout gets a stable ID, <code>healthkit:&#123;sample_uuid&#125;</code>,
                 so re-sending a record never creates a duplicate.
@@ -386,7 +387,7 @@ export default function SupportPage() {
           <section id="background" aria-labelledby="bg-title">
             <h2 id="bg-title">Background sync</h2>
             <p>HealthSync combines three wake-up paths to keep data current:</p>
-            <div className="docs-mini-grid">
+            <div className="kb-mini-grid">
               <div>
                 <Icon name="heart" />
                 <strong>HealthKit delivery</strong>
@@ -423,8 +424,8 @@ export default function SupportPage() {
               <code>duplicates</code>, and <code>deleted</code>. It also exposes authenticated
               read endpoints:
             </p>
-            <div className="docs-table" role="table" aria-label="Read endpoints">
-              <div role="row" className="docs-table-head">
+            <div className="kb-table" role="table" aria-label="Read endpoints">
+              <div role="row" className="kb-table-head">
                 <span role="columnheader">Endpoint</span>
                 <span role="columnheader">Returns</span>
               </div>
@@ -457,9 +458,10 @@ export default function SupportPage() {
             <p>
               Responses include raw records plus agent-friendly fields: a catalog of metric types,
               activity types, devices, and timezones; local dates on every record; daily metric and
-              workout summaries; and pagination.
+              workout summaries; and pagination. See the{" "}
+              <a href="/docs/agent-access">agent access guide</a> for setup steps.
             </p>
-            <div className="docs-callout warn">
+            <div className="kb-callout warn">
               <Icon name="lock" />
               <p>
                 Never share your ingest token with an agent. If a token may have been exposed,
@@ -470,7 +472,7 @@ export default function SupportPage() {
 
           <section id="troubleshooting" aria-labelledby="ts-title">
             <h2 id="ts-title">Troubleshooting</h2>
-            <div className="faq-list docs-faq">
+            <div className="faq-list kb-faq">
               {troubleshootingItems.map((item) => (
                 <details key={item.title}>
                   <summary>{item.title}</summary>
@@ -481,20 +483,20 @@ export default function SupportPage() {
           </section>
 
           <section id="contact" aria-labelledby="contact-title">
-            <div className="docs-contact">
+            <div className="kb-contact">
               <div>
                 <h2 id="contact-title">Still need help?</h2>
                 <p>
                   Email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> with your iPhone
                   model, iOS version, app version, storage mode, and the Sync Log message you see.
                 </p>
-                <p className="docs-contact-note">
+                <p className="kb-contact-note">
                   Please don&apos;t send raw Apple Health exports or any tokens. HealthSync is a data
                   sync utility, not a medical device, and does not provide medical advice or
                   emergency support.
                 </p>
               </div>
-              <div className="docs-contact-actions">
+              <div className="kb-contact-actions">
                 <a className="lp-button-light" href={`mailto:${CONTACT_EMAIL}`}>
                   Email support
                 </a>

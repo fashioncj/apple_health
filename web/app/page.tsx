@@ -356,7 +356,7 @@ export default function Home() {
             </p>
             <div className="lp-hero-actions">
               <AppStoreButton />
-              <a className="lp-button-ghost" href="/support">
+              <a className="lp-button-ghost" href="/docs">
                 Read the docs
                 <Icon name="arrow" />
               </a>
@@ -582,11 +582,15 @@ export default function Home() {
             <p className="lp-kicker">FAQ</p>
             <h2 id="faq-title">Frequently asked questions</h2>
             <p>
-              Can&apos;t find an answer? Visit{" "}
-              <a className="lp-inline-link" href="/support">
-                Docs &amp; Support
+              Can&apos;t find an answer? Read the{" "}
+              <a className="lp-inline-link" href="/docs">
+                documentation
               </a>{" "}
-              or email us.
+              or visit{" "}
+              <a className="lp-inline-link" href="/support">
+                Support
+              </a>
+              .
             </p>
           </div>
           <div className="faq-list">
@@ -607,8 +611,8 @@ export default function Home() {
           <p>Free on the App Store. Set up in less than a minute.</p>
           <div className="lp-hero-actions center">
             <AppStoreButton variant="light" />
-            <a className="lp-button-ghost light" href="/support">
-              Docs &amp; Support
+            <a className="lp-button-ghost light" href="/docs">
+              Read the docs
               <Icon name="arrow" />
             </a>
           </div>
