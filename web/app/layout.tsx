@@ -9,6 +9,7 @@ import {
   WEBSITE_ID
 } from "@/lib/site";
 import "./globals.css";
+import "./site.css";
 
 const siteStructuredData = {
   "@context": "https://schema.org",

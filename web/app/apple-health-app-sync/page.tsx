@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { absoluteUrl, APP_STORE_URL, ORGANIZATION_ID } from "@/lib/site";
+import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 
 const pageTitle = "Apple Health App Sync for Private APIs";
 const pageDescription =
@@ -77,20 +78,7 @@ export default function AppleHealthAppSyncPage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleStructuredData) }}
       />
 
-      <header className="site-header" aria-label="HealthSync">
-        <a className="brand" href="/" aria-label="HealthSync home">
-          <Image src="/healthsync-logo.png" alt="" width={42} height={42} priority />
-          <span>HealthSync</span>
-        </a>
-        <nav aria-label="Page">
-          <a href={APP_STORE_URL}>App Store</a>
-          <a href="#how-it-works">How it works</a>
-          <a href="/privacy">Privacy</a>
-          <a href="/support">Support</a>
-          <a href="/docs">Docs</a>
-          <a href="/apple-health-sync-alternatives">Alternatives</a>
-        </nav>
-      </header>
+      <SiteHeader />
 
       <section className="resource-hero" aria-labelledby="resource-title">
         <div className="resource-shell resource-hero-grid">
@@ -237,6 +225,7 @@ export default function AppleHealthAppSyncPage() {
           </div>
         </div>
       </section>
+      <SiteFooter />
     </main>
   );
 }
