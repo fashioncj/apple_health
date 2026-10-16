@@ -1,4 +1,6 @@
 .DS_Store
+.amp/portals/
+.amp/resume-last-ran.txt
 .DerivedData/
 DerivedData/
 .env

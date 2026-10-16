@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Fast reconnect after an orb wakes. Do not install packages here.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+if systemctl is-enabled postgresql >/dev/null 2>&1; then
+  if ! sudo -n pg_isready -q -h 127.0.0.1 -p 15432; then
+    sudo systemctl start postgresql
+  fi
+  sudo -n pg_isready -q -h 127.0.0.1 -p 15432
+fi
+
+mkdir -p .amp
+date -u +%Y-%m-%dT%H:%M:%SZ > .amp/resume-last-ran.txt
+echo "HealthSync orb resume complete"

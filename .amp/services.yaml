@@ -1,0 +1,8 @@
+services:
+  web:
+    command: npm run dev --prefix web -- --hostname 0.0.0.0 --port "$PORT"
+    health: /
+    portal:
+      url: /
+      title: HealthSync website
+      description: Public HealthSync site. Local TestFlight requests are stored only in this orb.
