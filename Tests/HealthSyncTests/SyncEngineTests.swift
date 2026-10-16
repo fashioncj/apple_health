@@ -612,6 +612,60 @@ final class IncrementalMaintenanceTests: XCTestCase {
         XCTAssertEqual(requests.count, 1)
     }
 
+    func testFailedReconciliationUploadsPendingBatchBeforeRethrowingReadError() async throws {
+        let url = databaseURL()
+        let store = try SQLiteLocalStore(url: url)
+        let batch = SyncBatch(payload: .empty(deviceID: configuration.deviceID,
+            dateRange: SyncDateRange(start: now, end: now), timezone: "UTC"), attemptCount: 2)
+        try await store.enqueueBatch(batch)
+        let reader = MaintenanceHealthReader()
+        await reader.setRaw(.empty, fail: true)
+        let uploader = MaintenanceUploader()
+        let runner = IncrementalSyncRunner(store: store, reader: reader, uploader: uploader)
+
+        do {
+            try await runner.run(types: [.stepCount], configuration: configuration, now: now, calendar: calendar)
+            XCTFail("Read error must be surfaced after retrying pending uploads")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet)
+        }
+
+        let reopened = try SQLiteLocalStore(url: url)
+        let pending = try await reopened.pendingBatches()
+        XCTAssertTrue(pending.isEmpty)
+        let payloads = await uploader.payloads
+        XCTAssertEqual(payloads.map(\.exportID), [batch.payload.exportID])
+        try await IncrementalSyncRunner(store: reopened, reader: reader, uploader: uploader)
+            .run(types: [.stepCount], configuration: configuration, now: now.addingTimeInterval(3600), calendar: calendar)
+        let requests = await reader.rawRequests
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testFailedReconciliationPreservesReadErrorWhenPendingRetryFails() async throws {
+        let store = try SQLiteLocalStore(url: databaseURL())
+        let batch = SyncBatch(payload: .empty(deviceID: configuration.deviceID,
+            dateRange: SyncDateRange(start: now, end: now), timezone: "UTC"), attemptCount: 2)
+        try await store.enqueueBatch(batch)
+        let reader = MaintenanceHealthReader()
+        await reader.setRaw(.empty, fail: true)
+        let uploader = MaintenanceUploader(fails: true)
+        let runner = IncrementalSyncRunner(store: store, reader: reader, uploader: uploader)
+
+        do {
+            try await runner.run(types: [.stepCount], configuration: configuration, now: now, calendar: calendar)
+            XCTFail("Read error must be preserved when retrying also fails")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet)
+        }
+
+        let pending = try await store.pendingBatches()
+        XCTAssertEqual(pending.map(\.id), [batch.id])
+        XCTAssertEqual(pending.first?.attemptCount, 3)
+        try await runner.run(types: [.stepCount], configuration: configuration, now: now.addingTimeInterval(3600), calendar: calendar)
+        let payloads = await uploader.payloads
+        XCTAssertEqual(payloads.map(\.exportID), [batch.payload.exportID])
+    }
+
     func testStaleBacklogAttemptsOnlyOneBatchPerDay() async throws {
         let store = try SQLiteLocalStore(url: databaseURL())
         for index in 0..<3 {

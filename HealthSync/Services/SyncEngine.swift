@@ -167,7 +167,14 @@ actor IncrementalSyncRunner {
         if !recentTypes.isEmpty,
            try await store.claimDailyMaintenance("recent_samples", now: now, calendar: calendar) {
             let start = calendar.date(byAdding: .day, value: -3, to: calendar.startOfDay(for: now))!
-            let recent = try await reader.fetchSamples(types: recentTypes, start: start, end: now)
+            let recent: HealthKitFetchResult
+            do {
+                recent = try await reader.fetchSamples(types: recentTypes, start: start, end: now)
+            } catch {
+                try Task.checkCancellation()
+                try? await retryPending(configuration: configuration, now: now, calendar: calendar)
+                throw error
+            }
             try Task.checkCancellation()
             let recentBatches = try await queue(recent, deletions: [], configuration: configuration,
                 range: SyncDateRange(start: start, end: now), timezone: calendar.timeZone.identifier)
