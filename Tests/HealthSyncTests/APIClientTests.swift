@@ -2,6 +2,194 @@ import XCTest
 import HealthKit
 @testable import HealthSync
 
+final class PopulatedWorkoutExportTests: XCTestCase {
+    func testEllipticalWithAllMetricsSurvivesQueueAndHTTPEncoding() async throws {
+        try await assertPopulatedExport(
+            activity: .elliptical, name: "elliptical", rawType: "16",
+            distanceType: .distanceWalkingRunning, metadataMETs: 6.25, expectedMETs: 6.25
+        )
+    }
+
+    func testRowingWithAllMetricsSurvivesQueueAndHTTPEncoding() async throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("Rowing distance requires iOS 18") }
+        try await assertPopulatedExport(
+            activity: .rowing, name: "rowing", rawType: "35",
+            distanceType: .distanceRowing, metadataMETs: nil, expectedMETs: 4.5
+        )
+    }
+
+    private func assertPopulatedExport(
+        activity: HKWorkoutActivityType, name: String, rawType: String,
+        distanceType: HKQuantityTypeIdentifier, metadataMETs: Double?, expectedMETs: Double
+    ) async throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("Populated effort fixtures require iOS 18") }
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let end = start.addingTimeInterval(2100)
+        var sourceMetadata: [String: Any] = ["user_tag": "fixture"]
+        if let metadataMETs {
+            sourceMetadata[HKMetadataKeyAverageMETs] = HKQuantity(unit: HKUnit(from: "kcal/kg*hr"), doubleValue: metadataMETs)
+        }
+        let workout = HKWorkout(
+            activityType: activity, start: start, end: end, duration: 2100,
+            totalEnergyBurned: HKQuantity(unit: .kilocalorie(), doubleValue: 12),
+            totalDistance: nil, metadata: sourceMetadata
+        )
+        let userEffort = HKQuantityType(.workoutEffortScore)
+        let estimatedEffort = HKQuantityType(.estimatedWorkoutEffortScore)
+        let effortSamples = [
+            HKQuantitySample(type: userEffort, quantity: HKQuantity(unit: .appleEffortScore(), doubleValue: 4), start: start, end: start),
+            HKQuantitySample(type: userEffort, quantity: HKQuantity(unit: .appleEffortScore(), doubleValue: 7), start: start, end: end),
+            HKQuantitySample(type: estimatedEffort, quantity: HKQuantity(unit: .appleEffortScore(), doubleValue: 6), start: start, end: end)
+        ]
+        let manager = HealthKitManager(
+            sampleReader: { type, predicate in
+                XCTAssertEqual(predicate, HKQuery.predicateForWorkoutEffortSamplesRelated(workout: workout, activity: nil))
+                return effortSamples.filter { $0.sampleType == type }.reversed()
+            },
+            workoutStatisticsReader: { readWorkout, type, option in
+                XCTAssertEqual(readWorkout.uuid, workout.uuid)
+                switch (type.identifier, option) {
+                case (HKQuantityTypeIdentifier.activeEnergyBurned.rawValue, .cumulativeSum):
+                    return HKQuantity(unit: HKUnit(from: "kJ"), doubleValue: 1004.16)
+                case (HKQuantityTypeIdentifier.basalEnergyBurned.rawValue, .cumulativeSum):
+                    return HKQuantity(unit: .kilocalorie(), doubleValue: 35)
+                case (HKQuantityTypeIdentifier.heartRate.rawValue, .discreteAverage):
+                    return HKQuantity(unit: .hertz(), doubleValue: 2)
+                case (HKQuantityTypeIdentifier.heartRate.rawValue, .discreteMax):
+                    return HKQuantity(unit: .hertz(), doubleValue: 3)
+                case (distanceType.rawValue, .cumulativeSum):
+                    return HKQuantity(unit: .meterUnit(with: .kilo), doubleValue: 3.45)
+                case (HKQuantityTypeIdentifier.physicalEffort.rawValue, .discreteAverage):
+                    return HKQuantity(unit: HKUnit(from: "kcal/kg*hr"), doubleValue: 4.5)
+                default: return nil
+                }
+            }
+        )
+        let converted = try await manager.convert(samples: [workout], as: .workouts)
+        let payload = try HealthNormalizer().payload(
+            deviceID: "fixture-device", dateRange: SyncDateRange(start: start, end: end), timezone: "UTC",
+            quantitySamples: [], sleepSamples: [], workoutSamples: converted.workoutSamples, generatedAt: end
+        )
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("WorkoutFixture-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = directory.appendingPathComponent("queue.sqlite")
+        let queue = try SQLiteLocalStore(url: database)
+        try await queue.enqueueBatch(SyncBatch(payload: payload, createdAt: end))
+        let reopened = try SQLiteLocalStore(url: database)
+        let pending = try await reopened.pendingBatches()
+        XCTAssertEqual(pending.count, 1)
+        let persisted = try XCTUnwrap(pending.first)
+        let request = try APIClient.makeSyncRequest(
+            baseURL: "https://example.com", token: "fixture-token", deviceID: "fixture-device",
+            appVersion: "1.0.1", payload: persisted.payload
+        )
+        XCTAssertEqual(request.url?.path, "/api/apple-health/sync")
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let exported = try XCTUnwrap((json["workouts"] as? [[String: Any]])?.first)
+        let metadata = try XCTUnwrap(exported["metadata"] as? [String: String])
+        XCTAssertEqual(exported["id"] as? String, "healthkit:\(workout.uuid.uuidString)")
+        XCTAssertEqual(exported["activity_type"] as? String, name)
+        XCTAssertEqual(exported["source_name"] as? String, workout.sourceRevision.source.name)
+        XCTAssertEqual(try XCTUnwrap(exported["active_energy_kcal"] as? Double), 240, accuracy: 0.000001)
+        XCTAssertEqual(try XCTUnwrap(exported["total_energy_kcal"] as? Double), 275, accuracy: 0.000001)
+        XCTAssertEqual(try XCTUnwrap(exported["distance_meters"] as? Double), 3450, accuracy: 0.000001)
+        XCTAssertEqual(metadata["hk_workout_activity_type"], rawType)
+        XCTAssertEqual(metadata["user_tag"], "fixture")
+        for (key, expected) in [
+            ("average_heart_rate_bpm", 120.0), ("max_heart_rate_bpm", 180.0),
+            ("average_mets", expectedMETs), ("workout_effort_score", 7.0), ("estimated_workout_effort_score", 6.0)
+        ] {
+            XCTAssertEqual(try XCTUnwrap(metadata[key].flatMap(Double.init), key), expected, accuracy: 0.000001)
+        }
+    }
+}
+
+final class PhysicalWorkoutValidationTests: XCTestCase {
+    func testExistingWorkoutsMatchHealthKitStatistics() async throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Requires a physical iPhone with existing HealthKit workouts")
+        #else
+        guard ProcessInfo.processInfo.environment["HEALTHSYNC_DEVICE_VALIDATION"] == "1" else {
+            throw XCTSkip("Opt in with TEST_RUNNER_HEALTHSYNC_DEVICE_VALIDATION=1")
+        }
+        let store = HKHealthStore()
+        let workouts: [HKWorkout] = try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(), predicate: nil, limit: 20,
+                sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)]
+            ) { _, samples, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: samples?.compactMap { $0 as? HKWorkout } ?? []) }
+            }
+            store.execute(query)
+        }
+        guard !workouts.isEmpty else { throw XCTSkip("No readable workouts; review Health permissions on the iPhone") }
+        let result = try await HealthKitManager(healthStore: store).convert(samples: workouts, as: .workouts)
+        XCTAssertEqual(result.workoutSamples.count, workouts.count)
+        var availability: [String: Int] = [:]
+        for (workout, sample) in zip(workouts, result.workoutSamples) {
+            XCTAssertEqual(sample.uuid, workout.uuid)
+            XCTAssertEqual(sample.metadata["hk_workout_activity_type"], String(workout.workoutActivityType.rawValue))
+            if workout.workoutActivityType != .other { XCTAssertNotEqual(sample.activityType, "other") }
+            let expectedNames: [HKWorkoutActivityType: String] = [
+                .elliptical: "elliptical", .rowing: "rowing", .highIntensityIntervalTraining: "highIntensityIntervalTraining",
+                .yoga: "yoga", .swimming: "swimming", .hiking: "hiking", .flexibility: "flexibility",
+                .cooldown: "cooldown", .mindAndBody: "mindAndBody", .stairClimbing: "stairClimbing",
+                .traditionalStrengthTraining: "traditionalStrengthTraining"
+            ]
+            if let expected = expectedNames[workout.workoutActivityType] { XCTAssertEqual(sample.activityType, expected) }
+            let active = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
+                ?? workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())
+            let basal = workout.statistics(for: HKQuantityType(.basalEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
+            XCTAssertEqual(sample.activeEnergyKcal, active)
+            XCTAssertEqual(sample.totalEnergyKcal, active.flatMap { a in basal.map { a + $0 } })
+            let heart = workout.statistics(for: HKQuantityType(.heartRate))
+            let bpm = HKUnit.count().unitDivided(by: .minute())
+            XCTAssertEqual(sample.metadata["average_heart_rate_bpm"].flatMap(Double.init), heart?.averageQuantity()?.doubleValue(for: bpm))
+            XCTAssertEqual(sample.metadata["max_heart_rate_bpm"].flatMap(Double.init), heart?.maximumQuantity()?.doubleValue(for: bpm))
+            let metsUnit = HKUnit(from: "kcal/kg*hr")
+            let mets = (workout.metadata?[HKMetadataKeyAverageMETs] as? HKQuantity)?.doubleValue(for: metsUnit)
+                ?? workout.statistics(for: HKQuantityType(.physicalEffort))?.averageQuantity()?.doubleValue(for: metsUnit)
+            XCTAssertEqual(sample.metadata["average_mets"].flatMap(Double.init), mets)
+            for key in ["average_heart_rate_bpm", "max_heart_rate_bpm", "average_mets", "workout_effort_score", "estimated_workout_effort_score"] {
+                if sample.metadata[key] != nil { availability[key, default: 0] += 1 }
+            }
+            if sample.activeEnergyKcal != nil { availability["active_energy_kcal", default: 0] += 1 }
+            if sample.totalEnergyKcal != nil { availability["total_energy_kcal", default: 0] += 1 }
+            if sample.distanceMeters != nil { availability["distance_meters", default: 0] += 1 }
+            let payload = HealthNormalizer().workouts(from: [sample])[0]
+            let encoded = try PayloadJSON.encoder.encode(payload)
+            let decoded = try PayloadJSON.decoder.decode(HealthWorkout.self, from: encoded)
+            XCTAssertEqual(decoded.id, payload.id)
+            XCTAssertEqual(decoded.activityType, payload.activityType)
+            XCTAssertEqual(decoded.durationSeconds, payload.durationSeconds)
+            XCTAssertEqual(decoded.activeEnergyKcal, payload.activeEnergyKcal)
+            XCTAssertEqual(decoded.totalEnergyKcal, payload.totalEnergyKcal)
+            XCTAssertEqual(decoded.distanceMeters, payload.distanceMeters)
+            XCTAssertEqual(decoded.metadata, payload.metadata)
+            XCTAssertEqual(decoded.startAt.timeIntervalSince1970, payload.startAt.timeIntervalSince1970, accuracy: 0.001)
+            XCTAssertEqual(decoded.endAt.timeIntervalSince1970, payload.endAt.timeIntervalSince1970, accuracy: 0.001)
+        }
+        let report: [String: Any] = [
+            "workouts_checked": workouts.count,
+            "activity_types": Array(Set(result.workoutSamples.map(\.activityType))).sorted(),
+            "available_field_counts": availability
+        ]
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HealthSync", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: directory.appendingPathComponent("WorkoutValidation.json"), options: .atomic)
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "Workout field availability"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        #endif
+    }
+}
+
 final class APIClientTests: XCTestCase {
     func testWorkoutNamesPreserveExistingValuesAndExpandRequestedTypes() {
         let manager = HealthKitManager()
@@ -22,7 +210,7 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(manager.activityName(HKWorkoutActivityType(rawValue: 9999)!), "hk_9999")
     }
 
-    func testWorkoutConversionRetainsRawTypeAndSourceMetadata() throws {
+    func testWorkoutConversionRetainsRawTypeAndSourceMetadata() async throws {
         let workout = HKWorkout(
             activityType: .elliptical,
             start: Date(timeIntervalSince1970: 0),
@@ -32,7 +220,7 @@ final class APIClientTests: XCTestCase {
             totalDistance: HKQuantity(unit: .meter(), doubleValue: 345),
             metadata: ["user_tag": "keep-me"]
         )
-        let result = try HealthKitManager().convert(samples: [workout], as: .workouts)
+        let result = try await HealthKitManager(sampleReader: { _, _ in [] }).convert(samples: [workout], as: .workouts)
         let sample = try XCTUnwrap(result.workoutSamples.first)
         XCTAssertEqual(sample.uuid, workout.uuid)
         XCTAssertEqual(sample.activityType, "elliptical")
@@ -40,10 +228,180 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(sample.metadata["user_tag"], "keep-me")
         XCTAssertEqual(sample.distanceMeters, workout.totalDistance?.doubleValue(for: .meter()))
         XCTAssertEqual(sample.activeEnergyKcal, 12)
+        XCTAssertNil(sample.totalEnergyKcal)
         let encoded = try PayloadJSON.encoder.encode(HealthNormalizer().workouts(from: [sample])[0])
         let decoded = try PayloadJSON.decoder.decode(HealthWorkout.self, from: encoded)
         XCTAssertEqual(decoded.metadata["hk_workout_activity_type"], "16")
         XCTAssertEqual(decoded.id, "healthkit:\(workout.uuid.uuidString)")
+    }
+
+    func testWorkoutConversionExportsNumericMETsWithoutInventingMissingMetrics() async throws {
+        let workout = HKWorkout(
+            activityType: .elliptical,
+            start: Date(timeIntervalSince1970: 0),
+            end: Date(timeIntervalSince1970: 60),
+            duration: 60,
+            totalEnergyBurned: nil,
+            totalDistance: nil,
+            metadata: [
+                HKMetadataKeyAverageMETs: HKQuantity(unit: HKUnit(from: "kcal/kg*hr"), doubleValue: 4.5),
+                "user_tag": "keep-me"
+            ]
+        )
+        let result = try await HealthKitManager(sampleReader: { _, _ in [] }).convert(samples: [workout], as: .workouts)
+        let sample = try XCTUnwrap(result.workoutSamples.first)
+        XCTAssertEqual(sample.metadata["average_mets"].flatMap(Double.init), 4.5)
+        XCTAssertEqual(sample.metadata["user_tag"], "keep-me")
+        XCTAssertNil(sample.metadata["average_heart_rate_bpm"])
+        XCTAssertNil(sample.metadata["max_heart_rate_bpm"])
+        XCTAssertNil(sample.metadata["workout_effort_score"])
+        XCTAssertNil(sample.metadata["estimated_workout_effort_score"])
+        XCTAssertNil(sample.activeEnergyKcal)
+        XCTAssertNil(sample.totalEnergyKcal)
+        XCTAssertNil(sample.distanceMeters)
+    }
+
+    func testWorkoutStatisticsExportSeparateCaloriesHeartRateAndRowingDistance() throws {
+        let workout = HKWorkout(
+            activityType: .rowing,
+            start: Date(timeIntervalSince1970: 0),
+            end: Date(timeIntervalSince1970: 2100),
+            duration: 2100,
+            totalEnergyBurned: HKQuantity(unit: .kilocalorie(), doubleValue: 200),
+            totalDistance: nil,
+            metadata: ["user_tag": "keep-me"]
+        )
+        let sample = HealthKitManager().workoutSample(from: workout) { type, option in
+            switch (type, option) {
+            case (.activeEnergy, .cumulativeSum): 240
+            case (.basalEnergy, .cumulativeSum): 35
+            case (.heartRate, .discreteAverage): 122
+            case (.heartRate, .discreteMax): 158
+            case (.distanceRowing, .cumulativeSum): 3450
+            case (.physicalEffort, .discreteAverage): 4.5
+            default: nil
+            }
+        }
+        let encoded = try PayloadJSON.encoder.encode(HealthNormalizer().workouts(from: [sample])[0])
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let metadata = try XCTUnwrap(object["metadata"] as? [String: String])
+        XCTAssertEqual(object["active_energy_kcal"] as? Double, 240)
+        XCTAssertEqual(object["total_energy_kcal"] as? Double, 275)
+        XCTAssertEqual(object["distance_meters"] as? Double, 3450)
+        XCTAssertEqual(metadata["average_heart_rate_bpm"].flatMap(Double.init), 122)
+        XCTAssertEqual(metadata["max_heart_rate_bpm"].flatMap(Double.init), 158)
+        XCTAssertEqual(metadata["average_mets"].flatMap(Double.init), 4.5)
+        XCTAssertEqual(metadata["user_tag"], "keep-me")
+        XCTAssertEqual(metadata["hk_workout_activity_type"], "35")
+    }
+
+    func testWorkoutPermissionsIncludeSummaryTypesOnlyWhenWorkoutsAreSelected() {
+        let readTypes = HealthKitTypeRegistry.readTypes(for: [.workouts])
+        for type: HealthDataType in [.heartRate, .activeEnergy, .basalEnergy, .physicalEffort, .distanceRowing] {
+            XCTAssertTrue(readTypes.contains(HealthKitTypeRegistry.objectType(for: type)!))
+        }
+        XCTAssertEqual(HealthKitTypeRegistry.readTypes(for: [.stepCount]), [HKQuantityType(.stepCount)])
+    }
+
+    func testWorkoutConversionQueriesRelatedEffortAndExportsLatestRating() async throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("Workout effort requires iOS 18") }
+        let start = Date(timeIntervalSince1970: 0)
+        let workout = HKWorkout(activityType: .rowing, start: start, end: start.addingTimeInterval(60))
+        let effortType = HKQuantityType(.workoutEffortScore)
+        let estimatedType = HKQuantityType(.estimatedWorkoutEffortScore)
+        let samples = [
+            HKQuantitySample(type: effortType, quantity: HKQuantity(unit: .appleEffortScore(), doubleValue: 4), start: start, end: start),
+            HKQuantitySample(type: effortType, quantity: HKQuantity(unit: .appleEffortScore(), doubleValue: 7), start: start, end: start.addingTimeInterval(60)),
+            HKQuantitySample(type: estimatedType, quantity: HKQuantity(unit: .appleEffortScore(), doubleValue: 6), start: start, end: start)
+        ]
+        let manager = HealthKitManager(sampleReader: { type, predicate in
+            XCTAssertEqual(
+                predicate,
+                HKQuery.predicateForWorkoutEffortSamplesRelated(workout: workout, activity: nil)
+            )
+            return samples.filter { $0.sampleType == type }.reversed()
+        })
+        let result = try await manager.convert(samples: [workout], as: .workouts)
+        let metadata = try XCTUnwrap(result.workoutSamples.first?.metadata)
+        XCTAssertEqual(metadata["workout_effort_score"].flatMap(Double.init), 7)
+        XCTAssertEqual(metadata["estimated_workout_effort_score"].flatMap(Double.init), 6)
+    }
+
+    func testDeniedOptionalEffortDoesNotPreventWorkoutExport() async throws {
+        let start = Date(timeIntervalSince1970: 0)
+        let workout = HKWorkout(activityType: .yoga, start: start, end: start.addingTimeInterval(60))
+        let manager = HealthKitManager(sampleReader: { _, _ in
+            throw HKError(.errorAuthorizationDenied)
+        })
+        let result = try await manager.convert(samples: [workout], as: .workouts)
+        XCTAssertEqual(result.workoutSamples.first?.activityType, "yoga")
+        XCTAssertNil(result.workoutSamples.first?.metadata["workout_effort_score"])
+    }
+
+    func testWorkoutEffortReadFailuresAndCancellationPropagateForRetry() async throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("Workout effort requires iOS 18") }
+        let start = Date(timeIntervalSince1970: 0)
+        let workout = HKWorkout(activityType: .yoga, start: start, end: start.addingTimeInterval(60))
+        for expected: Error in [HKError(.errorDatabaseInaccessible), CancellationError()] {
+            let manager = HealthKitManager(sampleReader: { _, _ in throw expected })
+            do {
+                _ = try await manager.convert(samples: [workout], as: .workouts)
+                XCTFail("A failed effort read must not acknowledge an incomplete workout")
+            } catch {
+                XCTAssertEqual((error as NSError).domain, (expected as NSError).domain)
+                XCTAssertEqual((error as NSError).code, (expected as NSError).code)
+            }
+        }
+    }
+
+    func testWorkoutRereadAndBackfillIncludeRelatedEffort() async throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("Workout effort requires iOS 18") }
+        let start = Date(timeIntervalSince1970: 0)
+        let end = start.addingTimeInterval(60)
+        let workout = HKWorkout(activityType: .elliptical, start: start, end: end)
+        let effort = HKQuantitySample(
+            type: HKQuantityType(.workoutEffortScore),
+            quantity: HKQuantity(unit: .appleEffortScore(), doubleValue: 7),
+            start: start,
+            end: end
+        )
+        let manager = HealthKitManager(sampleReader: { type, predicate in
+            if type == HKObjectType.workoutType() {
+                XCTAssertEqual(predicate, HKQuery.predicateForSamples(withStart: start, end: end, options: [.strictStartDate, .strictEndDate]))
+                return [workout]
+            }
+            XCTAssertEqual(predicate, HKQuery.predicateForWorkoutEffortSamplesRelated(workout: workout, activity: nil))
+            return type == effort.sampleType ? [effort] : []
+        })
+        let recent = try await manager.fetchSamples(types: [.workouts], start: start, end: end)
+        let backfill = try await manager.fetchBackfillSamples(types: [.workouts], start: start, end: end)
+        for result in [recent, backfill] {
+            XCTAssertEqual(result.workoutSamples.count, 1)
+            XCTAssertEqual(result.workoutSamples.first?.metadata["workout_effort_score"].flatMap(Double.init), 7)
+            XCTAssertEqual(result.workoutSamples.first?.uuid, workout.uuid)
+            XCTAssertTrue(result.quantitySamples.isEmpty)
+        }
+    }
+
+    func testWorkoutDistanceAndMETsRemainAvailableWithoutActiveEnergy() {
+        let start = Date(timeIntervalSince1970: 0)
+        let workout = HKWorkout(
+            activityType: .rowing, start: start, end: start.addingTimeInterval(60), duration: 60,
+            totalEnergyBurned: nil, totalDistance: nil,
+            metadata: nil
+        )
+        let sample = HealthKitManager().workoutSample(from: workout) { type, option in
+            switch (type, option) {
+            case (.basalEnergy, .cumulativeSum): 10
+            case (.distanceRowing, .cumulativeSum): 999
+            case (.physicalEffort, .discreteAverage): 4.5
+            default: nil
+            }
+        }
+        XCTAssertEqual(sample.distanceMeters, 999)
+        XCTAssertEqual(sample.metadata["average_mets"].flatMap(Double.init), 4.5)
+        XCTAssertNil(sample.activeEnergyKcal)
+        XCTAssertNil(sample.totalEnergyKcal)
     }
 
     func testBackendURLValidationRejectsMissingURLBeforeSyncWorkBegins() {

@@ -91,6 +91,33 @@ Every metric and workout uses a deterministic ID of `healthkit:{sample_uuid}`. I
 
 Every upload batch has its own `export_id`. Failed additions and deletions remain queued locally for retry.
 
+### Workout summaries
+
+Workout activity names follow HealthKit's lowerCamelCase names, such as `elliptical`, `rowing`, and `highIntensityIntervalTraining`. Explicit Other workouts use `other`; unrecognized types use `hk_<rawValue>`. The original numeric type is always retained as the string `metadata.hk_workout_activity_type`.
+
+Workout exports include the following values when the source records them and the user grants read access:
+
+| Field | Meaning |
+| --- | --- |
+| `active_energy_kcal` | Active energy from workout statistics, falling back to HealthKit's legacy workout energy value. |
+| `total_energy_kcal` | Active plus basal energy associated with the workout; omitted when either component is unavailable. |
+| `distance_meters` | Recorded workout distance, with a fallback to the sum of associated distance statistics, including rowing on supported iOS versions. Elliptical distance is preserved when recorded by the source. |
+| `metadata.average_heart_rate_bpm` | Average heart rate from associated workout statistics. |
+| `metadata.max_heart_rate_bpm` | Maximum heart rate from associated workout statistics. |
+| `metadata.average_mets` | Average METs from workout metadata, falling back to associated physical-effort statistics, in kcal/(kg·hour). |
+| `metadata.workout_effort_score` | Latest related effort rating, with associated workout statistics as a fallback, in Apple's effort-score units on iOS 18+. |
+| `metadata.estimated_workout_effort_score` | Latest available estimated effort rating, with associated workout statistics as a fallback, in Apple's effort-score units on iOS 18+. |
+
+All metadata values remain **strings**, including numeric summaries. Missing values are omitted rather than filled with zero. Raw source metadata is retained alongside these summaries. The current export schema remains version 2, and the backend continues accepting legacy version 1 payloads; no backend migration is required.
+
+Earlier app builds copied active calories into `total_energy_kcal`. Newly read workouts correct that meaning; already queued payloads retain their saved contents. Consumers should use `active_energy_kcal` for active calories and treat an absent total as unknown.
+
+Selecting Workouts also requests read access to the supporting heart-rate, energy, distance, and effort types. Existing users can request these permissions again from Settings → Apple Health Access. Denying optional effort access does not prevent workout export. Other read errors keep the operation retryable.
+
+Summaries are snapshots taken during incremental workout reads, recent rereads, and backfill. The daily reread revisits today and the previous three local calendar days. Later edits to older workout metrics or effort relationships require manually backfilling the affected dates. Raw heart-rate samples remain a separate selected metric; the workout metadata contains summaries.
+
+The statistics and effort reads use Apple's [workout statistics API](https://developer.apple.com/documentation/healthkit/hkworkout/statistics(for:)) and [related effort predicate](https://developer.apple.com/documentation/healthkit/hkquery/predicateforworkouteffortsamplesrelated(workout:activity:)).
+
 ## Local Persistence
 
 The app uses SQLite for settings, selected data types, sync frequency, HealthKit anchors, queued upload batches, sync logs, and the stable local device ID. Auth tokens are stored only in Keychain.
@@ -124,6 +151,24 @@ Run the full XCTest suite with an available simulator:
 ```bash
 xcodebuild test -project HealthSync.xcodeproj -scheme HealthSync -destination 'platform=iOS Simulator,name=iPhone 16' -derivedDataPath .DerivedData CODE_SIGNING_ALLOWED=NO
 ```
+
+`PopulatedWorkoutExportTests` supplies in-memory elliptical and rowing fixtures with heart rate, active/basal energy, distance, METs, and both effort scores. It checks native HealthKit unit conversion, activity mapping, latest related effort selection, SQLite queue persistence after reopening, and the final HTTP request JSON. These fixtures run on simulator or device without saving workouts to HealthKit or sending the synthetic request. Run just these cases by adding `-only-testing:HealthSyncTests/PopulatedWorkoutExportTests` to an XCTest command. They validate the export pipeline when statistics are provided; actual source-app recording and HealthKit statistic population remain device acceptance checks.
+
+An opt-in integration test also compares the latest 20 readable workouts on a connected iPhone with their HealthKit statistics and verifies JSON export. First grant HealthSync read access on the phone, then run this with its device ID and your signing team:
+
+```bash
+TEST_RUNNER_HEALTHSYNC_DEVICE_VALIDATION=1 xcodebuild test \
+  -project HealthSync.xcodeproj -scheme HealthSync -configuration Release \
+  -destination 'id=YOUR_IPHONE_UDID' \
+  -derivedDataPath /tmp/HealthSyncDeviceTests \
+  -resultBundlePath /tmp/HealthSyncDeviceTests.xcresult \
+  -only-testing:HealthSyncTests/PhysicalWorkoutValidationTests \
+  -parallel-testing-enabled NO -collect-test-diagnostics never \
+  -allowProvisioningUpdates DEVELOPMENT_TEAM=YOUR_TEAM_ID \
+  CODE_SIGN_STYLE=Automatic ENABLE_TESTABILITY=YES
+```
+
+The test uses existing read permissions and records activity types and field-availability counts in an XCTest attachment and `Library/Application Support/HealthSync/WorkoutValidation.json` inside the app container. Normal app-launch behavior, including configured sync, still applies. The test skips on simulators, without the opt-in variable, or when no workouts are readable. Its coverage depends on the workouts and associated statistics available on that phone; absent fields do not establish that another source's populated fields work on-device.
 
 ## Persistent Backend
 

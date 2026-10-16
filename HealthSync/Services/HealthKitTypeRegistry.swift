@@ -3,7 +3,17 @@ import HealthKit
 
 enum HealthKitTypeRegistry {
     static func readTypes(for selectedTypes: Set<HealthDataType>) -> Set<HKObjectType> {
-        Set(selectedTypes.compactMap { objectType(for: $0) })
+        var types = selectedTypes
+        if types.contains(.workouts) {
+            types.formUnion([
+                .heartRate, .activeEnergy, .basalEnergy, .physicalEffort,
+                .workoutEffortScore, .estimatedWorkoutEffortScore,
+                .distanceWalkingRunning, .distanceCycling, .distanceSwimming, .distanceWheelchair,
+                .distanceCrossCountrySkiing, .distanceDownhillSnowSports, .distancePaddleSports,
+                .distanceRowing, .distanceSkatingSports
+            ])
+        }
+        return Set(types.compactMap { objectType(for: $0) })
     }
 
     static func sampleType(for type: HealthDataType) -> HKSampleType? {
