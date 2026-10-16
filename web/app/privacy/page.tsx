@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { absoluteUrl } from "@/lib/site";
+import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 
 const contactEmail = "contact@megabyte0x.xyz";
 const pageTitle = "Privacy Policy";
@@ -102,17 +103,7 @@ export default function PrivacyPage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(privacyStructuredData) }}
       />
 
-      <header className="site-header" aria-label="HealthSync">
-        <a className="brand" href="/" aria-label="HealthSync home">
-          <Image src="/healthsync-logo.png" alt="" width={42} height={42} priority />
-          <span>HealthSync</span>
-        </a>
-        <nav aria-label="Page">
-          <a href="/">Home</a>
-          <a href="/apple-health-app-sync">Sync guide</a>
-          <a href="/support">Support</a>
-        </nav>
-      </header>
+      <SiteHeader />
 
       <section className="resource-hero policy-hero" aria-labelledby="privacy-title">
         <div className="resource-shell resource-hero-grid">
@@ -275,6 +266,7 @@ export default function PrivacyPage() {
           <a className="resource-button" href="/support">Open support</a>
         </div>
       </section>
+      <SiteFooter />
     </main>
   );
 }

@@ -14,3 +14,5 @@ export function absoluteUrl(path = "/") {
 
   return `${SITE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
+export const GITHUB_URL = "https://github.com/megabyte0x/healthykit";
+export const CONTACT_EMAIL = "contact@megabyte0x.xyz";
