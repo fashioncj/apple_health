@@ -94,12 +94,22 @@ protocol HealthKitSyncReading {
 }
 
 final class HealthKitManager: HealthKitSyncReading {
+    typealias SampleReader = (HKSampleType, NSPredicate?) async throws -> [HKSample]
+    typealias WorkoutStatisticsReader = (HKWorkout, HKQuantityType, HKStatisticsOptions) -> HKQuantity?
+
     private let healthStore: HKHealthStore
+    private let sampleReader: SampleReader?
+    private let workoutStatisticsReader: WorkoutStatisticsReader?
     private var observerQueries: [HKObserverQuery] = []
     private var observerSampleTypes: [HKSampleType] = []
 
-    init(healthStore: HKHealthStore = HKHealthStore()) {
+    init(
+        healthStore: HKHealthStore = HKHealthStore(), sampleReader: SampleReader? = nil,
+        workoutStatisticsReader: WorkoutStatisticsReader? = nil
+    ) {
         self.healthStore = healthStore
+        self.sampleReader = sampleReader
+        self.workoutStatisticsReader = workoutStatisticsReader
     }
 
     var isHealthDataAvailable: Bool {
@@ -211,7 +221,7 @@ final class HealthKitManager: HealthKitSyncReading {
                 throw HealthKitManagerError.missingAnchor
             }
             updatedAnchors[type] = try encodeAnchor(newAnchor)
-            let converted = try convert(samples: samples, as: type)
+            let converted = try await convert(samples: samples, as: type)
             fetchResult.quantitySamples += converted.quantitySamples
             fetchResult.categorySamples += converted.categorySamples
             fetchResult.sleepSamples += converted.sleepSamples
@@ -414,14 +424,12 @@ final class HealthKitManager: HealthKitSyncReading {
         let workoutType = HKObjectType.workoutType()
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [.strictStartDate, .strictEndDate])
         let samples = try await samples(sampleType: workoutType, predicate: predicate)
-        return samples.compactMap { sample in
-            guard let workout = sample as? HKWorkout else { return nil }
-            return workoutSample(from: workout)
-        }
+        return try await convert(samples: samples, as: .workouts).workoutSamples
     }
 
     private func samples(sampleType: HKSampleType, predicate: NSPredicate?) async throws -> [HKSample] {
-        try await withCheckedThrowingContinuation { continuation in
+        if let sampleReader { return try await sampleReader(sampleType, predicate) }
+        return try await withCheckedThrowingContinuation { continuation in
             let query = HKSampleQuery(
                 sampleType: sampleType,
                 predicate: predicate,
@@ -524,7 +532,7 @@ final class HealthKitManager: HealthKitSyncReading {
         }
     }
 
-    func convert(samples: [HKSample], as type: HealthDataType) throws -> HealthKitFetchResult {
+    func convert(samples: [HKSample], as type: HealthDataType) async throws -> HealthKitFetchResult {
         switch type {
         case .sleepAnalysis:
             let sleep = samples.compactMap { sample -> HealthSleepSampleDTO? in
@@ -541,9 +549,11 @@ final class HealthKitManager: HealthKitSyncReading {
             }
             return HealthKitFetchResult(quantitySamples: [], categorySamples: [], sleepSamples: sleep, workoutSamples: [])
         case .workouts:
-            let workouts = samples.compactMap { sample -> HealthWorkoutSampleDTO? in
-                guard let workout = sample as? HKWorkout else { return nil }
-                return workoutSample(from: workout)
+            var workouts: [HealthWorkoutSampleDTO] = []
+            for case let workout as HKWorkout in samples {
+                try Task.checkCancellation()
+                let effortMetadata = try await workoutEffortMetadata(for: workout)
+                workouts.append(workoutSample(from: workout, effortMetadata: effortMetadata))
             }
             return HealthKitFetchResult(quantitySamples: [], categorySamples: [], sleepSamples: [], workoutSamples: workouts)
         default:
@@ -668,19 +678,89 @@ final class HealthKitManager: HealthKitSyncReading {
         }
     }
 
-    func workoutSample(from workout: HKWorkout) -> HealthWorkoutSampleDTO {
+    private func workoutEffortMetadata(for workout: HKWorkout) async throws -> [String: String] {
+        guard #available(iOS 18.0, *) else { return [:] }
+        var result: [String: String] = [:]
+        let predicate = HKQuery.predicateForWorkoutEffortSamplesRelated(workout: workout, activity: nil)
+        for type: HealthDataType in [.workoutEffortScore, .estimatedWorkoutEffortScore] {
+            guard let quantityType = HealthKitTypeRegistry.sampleType(for: type) as? HKQuantityType else { continue }
+            do {
+                try Task.checkCancellation()
+                let effortSamples = try await samples(sampleType: quantityType, predicate: predicate)
+                let latest = effortSamples.compactMap { $0 as? HKQuantitySample }.max {
+                    ($0.endDate, $0.startDate, $0.uuid.uuidString) < ($1.endDate, $1.startDate, $1.uuid.uuidString)
+                }
+                result[type.rawValue] = latest.map { String($0.quantity.doubleValue(for: .appleEffortScore())) }
+            } catch {
+                if HealthKitReadErrorPolicy.shouldSkipType(error) { continue }
+                if let error = error as? HKError, error.code == .errorAuthorizationDenied { continue }
+                throw error
+            }
+        }
+        return result
+    }
+
+    func workoutSample(from workout: HKWorkout, effortMetadata: [String: String] = [:]) -> HealthWorkoutSampleDTO {
+        workoutSample(from: workout, effortMetadata: effortMetadata) { type, option in
+            guard let quantityType = HealthKitTypeRegistry.sampleType(for: type) as? HKQuantityType,
+                  let unit = HealthKitTypeRegistry.preferredQuantityUnit(for: type)?.hkUnit else { return nil }
+            let quantity: HKQuantity?
+            if let workoutStatisticsReader {
+                quantity = workoutStatisticsReader(workout, quantityType, option)
+            } else {
+                guard let statistics = workout.statistics(for: quantityType) else { return nil }
+                switch option {
+                case .cumulativeSum: quantity = statistics.sumQuantity()
+                case .discreteAverage: quantity = statistics.averageQuantity()
+                case .discreteMax: quantity = statistics.maximumQuantity()
+                default: quantity = nil
+                }
+            }
+            return quantity?.doubleValue(for: unit)
+        }
+    }
+
+    func workoutSample(
+        from workout: HKWorkout,
+        effortMetadata: [String: String] = [:],
+        quantityValue: (HealthDataType, HKStatisticsOptions) -> Double?
+    ) -> HealthWorkoutSampleDTO {
         var workoutMetadata = metadata(from: workout)
         workoutMetadata["hk_workout_activity_type"] = String(workout.workoutActivityType.rawValue)
-        let energy = workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())
+        let activeEnergy = quantityValue(.activeEnergy, .cumulativeSum)
+            ?? workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())
+        let basalEnergy = quantityValue(.basalEnergy, .cumulativeSum)
+        let totalEnergy = activeEnergy.flatMap { active in basalEnergy.map { active + $0 } }
+        workoutMetadata["average_heart_rate_bpm"] = quantityValue(.heartRate, .discreteAverage).map { String($0) }
+        workoutMetadata["max_heart_rate_bpm"] = quantityValue(.heartRate, .discreteMax).map { String($0) }
+        let metsUnit = HKUnit(from: "kcal/kg*hr")
+        let averageMETs = (workout.metadata?[HKMetadataKeyAverageMETs] as? HKQuantity)
+            .flatMap { $0.is(compatibleWith: metsUnit) ? $0.doubleValue(for: metsUnit) : nil }
+            ?? quantityValue(.physicalEffort, .discreteAverage)
+        workoutMetadata["average_mets"] = averageMETs.map { String($0) }
+        for type: HealthDataType in [.workoutEffortScore, .estimatedWorkoutEffortScore] {
+            workoutMetadata[type.rawValue] = effortMetadata[type.rawValue]
+                ?? quantityValue(type, .discreteAverage).map { String($0) }
+        }
+        var distance = workout.totalDistance?.doubleValue(for: .meter())
+        if distance == nil {
+            let distances: [HealthDataType] = [
+                .distanceWalkingRunning, .distanceCycling, .distanceSwimming, .distanceWheelchair,
+                .distanceCrossCountrySkiing, .distanceDownhillSnowSports, .distancePaddleSports,
+                .distanceRowing, .distanceSkatingSports
+            ]
+            let values = distances.compactMap { quantityValue($0, .cumulativeSum) }
+            if !values.isEmpty { distance = values.reduce(0, +) }
+        }
         return HealthWorkoutSampleDTO(
             uuid: workout.uuid,
             activityType: activityName(workout.workoutActivityType),
             startAt: workout.startDate,
             endAt: workout.endDate,
             durationSeconds: workout.duration,
-            totalEnergyKcal: energy,
-            activeEnergyKcal: energy,
-            distanceMeters: workout.totalDistance?.doubleValue(for: .meter()),
+            totalEnergyKcal: totalEnergy,
+            activeEnergyKcal: activeEnergy,
+            distanceMeters: distance,
             sourceName: workout.sourceRevision.source.name,
             sourceBundleIdentifier: workout.sourceRevision.source.bundleIdentifier,
             metadata: workoutMetadata

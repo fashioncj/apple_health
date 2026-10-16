@@ -743,3 +743,35 @@ def test_workout_mapping_upgrade_and_unknown_types_preserve_existing_records(tmp
     workouts = client.get("/api/apple-health/workouts", headers=headers).json()["items"]
     assert len(workouts) == 1
     assert workouts[0]["activity_type"] == "hk_9999"
+
+
+def test_workout_summaries_round_trip_and_clear_unavailable_values_on_reread(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    headers = {"Authorization": "Bearer test-token", "X-App-Version": "1.0.1"}
+    payload = sample_payload()
+    workout = payload["workouts"][0]
+    workout.update(activity_type="rowing", active_energy_kcal=240, total_energy_kcal=275, distance_meters=3450)
+    workout["metadata"] = {
+        "hk_workout_activity_type": "35",
+        "average_heart_rate_bpm": "122.0",
+        "max_heart_rate_bpm": "158.0",
+        "average_mets": "4.5",
+        "workout_effort_score": "7.0",
+        "estimated_workout_effort_score": "6.0",
+        "user_tag": "keep-me",
+    }
+    assert client.post("/api/apple-health/sync", headers=headers, json=payload).status_code == 200
+    stored = client.get("/api/apple-health/workouts", headers=headers).json()["items"]
+    assert len(stored) == 1
+    for key in ["activity_type", "active_energy_kcal", "total_energy_kcal", "distance_meters", "metadata"]:
+        assert stored[0][key] == workout[key]
+
+    payload["export_id"] = "22222222-2222-4222-8222-222222222222"
+    workout.pop("total_energy_kcal")
+    workout["metadata"] = {"hk_workout_activity_type": "35", "user_tag": "keep-me"}
+    assert client.post("/api/apple-health/sync", headers=headers, json=payload).status_code == 200
+    stored = client.get("/api/apple-health/workouts", headers=headers).json()["items"]
+    assert len(stored) == 1
+    assert stored[0]["total_energy_kcal"] is None
+    assert stored[0]["active_energy_kcal"] == 240
+    assert stored[0]["metadata"] == workout["metadata"]
