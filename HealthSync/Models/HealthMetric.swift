@@ -62,6 +62,17 @@ struct SyncPayload: Codable, Equatable {
         metrics.isEmpty && workouts.isEmpty && deletions.isEmpty
     }
 
+    func excludingRecords(metricIDs: Set<String>, workoutIDs: Set<String>) -> SyncPayload {
+        let retainedMetrics = metrics.filter { !metricIDs.contains($0.id) }
+        let retainedWorkouts = workouts.filter { !workoutIDs.contains($0.id) }
+        let retainedDeletions = deletions.filter {
+            !($0.kind == .metric ? metricIDs : workoutIDs).contains($0.id)
+        }
+        guard retainedMetrics.count != metrics.count || retainedWorkouts.count != workouts.count
+            || retainedDeletions.count != deletions.count else { return self }
+        return copy(metrics: retainedMetrics, workouts: retainedWorkouts, deletions: retainedDeletions)
+    }
+
     func chunked(maxRecords: Int) -> [SyncPayload] {
         let recordLimit = max(1, maxRecords)
         guard metrics.count + workouts.count + deletions.count > recordLimit else { return [self] }

@@ -714,3 +714,32 @@ def test_agent_daily_summary_preserves_raw_samples_from_devices_without_an_aggre
             "maximum_value": 50.0,
         }
     ]
+
+
+def test_workout_mapping_upgrade_and_unknown_types_preserve_existing_records(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    headers = {"Authorization": "Bearer test-token", "X-App-Version": "1.0"}
+    legacy = sample_payload()
+    legacy["workouts"][0]["activity_type"] = "other"
+    assert client.post("/api/apple-health/sync", headers=headers, json=legacy).status_code == 200
+
+    updated = deepcopy(legacy)
+    updated["export_id"] = "22222222-2222-4222-8222-222222222222"
+    updated["workouts"][0]["activity_type"] = "elliptical"
+    updated["workouts"][0]["metadata"]["hk_workout_activity_type"] = "16"
+    for _ in range(2):
+        response = client.post("/api/apple-health/sync", headers=headers, json=updated)
+        assert response.status_code == 200
+        assert response.json()["duplicates"] == 2
+    workouts = client.get("/api/apple-health/workouts", headers=headers).json()["items"]
+    assert len(workouts) == 1
+    assert workouts[0]["id"] == legacy["workouts"][0]["id"]
+    assert workouts[0]["activity_type"] == "elliptical"
+    assert workouts[0]["metadata"] == {"weather": "clear", "hk_workout_activity_type": "16"}
+
+    updated["workouts"][0]["activity_type"] = "hk_9999"
+    updated["workouts"][0]["metadata"]["hk_workout_activity_type"] = "9999"
+    assert client.post("/api/apple-health/sync", headers=headers, json=updated).status_code == 200
+    workouts = client.get("/api/apple-health/workouts", headers=headers).json()["items"]
+    assert len(workouts) == 1
+    assert workouts[0]["activity_type"] == "hk_9999"

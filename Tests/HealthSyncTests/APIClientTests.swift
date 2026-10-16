@@ -3,6 +3,49 @@ import HealthKit
 @testable import HealthSync
 
 final class APIClientTests: XCTestCase {
+    func testWorkoutNamesPreserveExistingValuesAndExpandRequestedTypes() {
+        let manager = HealthKitManager()
+        let names: [(HKWorkoutActivityType, String)] = [
+            (.running, "running"), (.walking, "walking"), (.cycling, "cycling"),
+            (.traditionalStrengthTraining, "traditionalStrengthTraining"),
+            (.functionalStrengthTraining, "functionalStrengthTraining"),
+            (.elliptical, "elliptical"), (.rowing, "rowing"),
+            (.highIntensityIntervalTraining, "highIntensityIntervalTraining"),
+            (.yoga, "yoga"), (.swimming, "swimming"), (.hiking, "hiking"),
+            (.flexibility, "flexibility"), (.cooldown, "cooldown"),
+            (.mindAndBody, "mindAndBody"), (.stairClimbing, "stairClimbing"),
+            (.underwaterDiving, "underwaterDiving"), (.other, "other")
+        ]
+        for (type, expected) in names {
+            XCTAssertEqual(manager.activityName(type), expected)
+        }
+        XCTAssertEqual(manager.activityName(HKWorkoutActivityType(rawValue: 9999)!), "hk_9999")
+    }
+
+    func testWorkoutConversionRetainsRawTypeAndSourceMetadata() throws {
+        let workout = HKWorkout(
+            activityType: .elliptical,
+            start: Date(timeIntervalSince1970: 0),
+            end: Date(timeIntervalSince1970: 60),
+            duration: 60,
+            totalEnergyBurned: HKQuantity(unit: .kilocalorie(), doubleValue: 12),
+            totalDistance: HKQuantity(unit: .meter(), doubleValue: 345),
+            metadata: ["user_tag": "keep-me"]
+        )
+        let result = try HealthKitManager().convert(samples: [workout], as: .workouts)
+        let sample = try XCTUnwrap(result.workoutSamples.first)
+        XCTAssertEqual(sample.uuid, workout.uuid)
+        XCTAssertEqual(sample.activityType, "elliptical")
+        XCTAssertEqual(sample.metadata["hk_workout_activity_type"], "16")
+        XCTAssertEqual(sample.metadata["user_tag"], "keep-me")
+        XCTAssertEqual(sample.distanceMeters, workout.totalDistance?.doubleValue(for: .meter()))
+        XCTAssertEqual(sample.activeEnergyKcal, 12)
+        let encoded = try PayloadJSON.encoder.encode(HealthNormalizer().workouts(from: [sample])[0])
+        let decoded = try PayloadJSON.decoder.decode(HealthWorkout.self, from: encoded)
+        XCTAssertEqual(decoded.metadata["hk_workout_activity_type"], "16")
+        XCTAssertEqual(decoded.id, "healthkit:\(workout.uuid.uuidString)")
+    }
+
     func testBackendURLValidationRejectsMissingURLBeforeSyncWorkBegins() {
         XCTAssertThrowsError(try APIClient.validatedRootURL(from: "  ")) { error in
             XCTAssertEqual(error as? APIClientError, .missingBackendURL)
@@ -588,5 +631,108 @@ final class HostedStorageSetupPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.showsResetButton)
         XCTAssertEqual(presentation.resetButtonTitle, "Reset Hosted Storage")
         XCTAssertFalse(presentation.isResetButtonDisabled)
+    }
+}
+
+private final class UploadTestURLProtocol: URLProtocol {
+    static var handler: ((URLRequest) throws -> Data)?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        do {
+            let data = try Self.handler!(request)
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+    override func stopLoading() {}
+}
+
+final class UploadTransportRecoveryTests: XCTestCase {
+    private func session() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [UploadTestURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    func testCancelledNetworkRequestDoesNotRetry() async throws {
+        let session = session()
+        defer { session.invalidateAndCancel(); UploadTestURLProtocol.handler = nil }
+        let lock = NSLock()
+        var count = 0
+        UploadTestURLProtocol.handler = { _ in
+            lock.lock()
+            count += 1
+            lock.unlock()
+            throw URLError(.cancelled)
+        }
+        let payload = SyncPayload.empty(deviceID: "device", dateRange: SyncDateRange(start: .distantPast, end: .distantPast), timezone: "UTC")
+        do {
+            _ = try await APIClient(session: session).upload(batch: SyncBatch(payload: payload), configuration: UploadConfiguration(baseURL: "https://example.com", token: "test", deviceID: "device", appVersion: "1.0.1"))
+            XCTFail("Cancellation must propagate")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(count, 1)
+    }
+
+    func testLostUploadReplyRetriesOriginalExportAfterReopeningLocalDatabase() async throws {
+        let session = session()
+        defer { session.invalidateAndCancel(); UploadTestURLProtocol.handler = nil }
+        let lock = NSLock()
+        var count = 0
+        var bodies: [Data] = []
+        UploadTestURLProtocol.handler = { request in
+            lock.lock()
+            defer { lock.unlock() }
+            count += 1
+            var body = request.httpBody ?? Data()
+            if let stream = request.httpBodyStream {
+                stream.open()
+                defer { stream.close() }
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let length = stream.read(&buffer, maxLength: buffer.count)
+                    if length <= 0 { break }
+                    body.append(contentsOf: buffer.prefix(length))
+                }
+            }
+            bodies.append(body)
+            if count == 1 { throw URLError(.timedOut) }
+            return Data(#"{"ok":true,"received":1,"duplicates":1}"#.utf8)
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("LostReply-\(UUID()).sqlite")
+        let store = try SQLiteLocalStore(url: url)
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let metric = HealthMetric(id: "healthkit:retained-id", type: "step_count", value: 12, unit: "count", startAt: date, endAt: date, sourceName: "Watch", sourceBundleID: nil, metadata: [:])
+        let payload = SyncPayload(deviceID: "device", exportID: UUID(), generatedAt: date, timezone: "UTC", source: "ios-healthkit", schemaVersion: 1, dateRange: SyncDateRange(start: date, end: date), metrics: [metric], workouts: [])
+        let configuration = UploadConfiguration(baseURL: "https://example.com", token: "test", deviceID: "device", appVersion: "1.0.1")
+        let engine = SyncEngine(store: store, uploader: APIClient(session: session, maxAttempts: 1))
+        _ = try await engine.queue(payload: payload)
+        let first = await engine.uploadPending(configuration: configuration)
+        XCTAssertEqual(first.failedCount, 1)
+        let reopened = try SQLiteLocalStore(url: url)
+        let resumed = SyncEngine(store: reopened, uploader: APIClient(session: session, maxAttempts: 1))
+        let second = await resumed.uploadPending(configuration: configuration)
+        let pending = try await reopened.pendingBatches()
+        XCTAssertEqual(second.uploadedCount, 1)
+        XCTAssertTrue(pending.isEmpty)
+        XCTAssertEqual(count, 2)
+        XCTAssertFalse(bodies[0].isEmpty)
+        XCTAssertEqual(bodies[0], bodies[1])
+        let sent = try PayloadJSON.decoder.decode(SyncPayload.self, from: bodies[1])
+        XCTAssertEqual(sent.exportID, payload.exportID)
+        XCTAssertEqual(sent.metrics.map(\.id), [metric.id])
+    }
+
+    func testSleepPredicateIncludesCrossMidnightSamples() {
+        let midnight = Date(timeIntervalSince1970: 1_700_006_400)
+        let sample = HKCategorySample(type: HKCategoryType(.sleepAnalysis), value: HKCategoryValueSleepAnalysis.asleepCore.rawValue,
+            start: midnight.addingTimeInterval(-3600), end: midnight.addingTimeInterval(6 * 3600))
+        let predicate = HealthKitManager.sleepPredicate(start: midnight, end: midnight.addingTimeInterval(24 * 3600))
+        XCTAssertTrue(predicate.evaluate(with: sample))
     }
 }

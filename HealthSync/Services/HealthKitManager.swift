@@ -88,7 +88,12 @@ enum HealthKitReadErrorPolicy {
     }
 }
 
-final class HealthKitManager {
+protocol HealthKitSyncReading {
+    func fetchSamples(types: Set<HealthDataType>, start: Date, end: Date) async throws -> HealthKitFetchResult
+    func fetchIncremental(types: Set<HealthDataType>, anchors: [HealthDataType: String]) async throws -> HealthKitIncrementalResult
+}
+
+final class HealthKitManager: HealthKitSyncReading {
     private let healthStore: HKHealthStore
     private var observerQueries: [HKObserverQuery] = []
     private var observerSampleTypes: [HKSampleType] = []
@@ -359,11 +364,15 @@ final class HealthKitManager {
         return samples
     }
 
+    static func sleepPredicate(start: Date, end: Date) -> NSPredicate {
+        HKQuery.predicateForSamples(withStart: start, end: end, options: [])
+    }
+
     private func sleepSamples(start: Date, end: Date) async throws -> [HealthSleepSampleDTO] {
         guard let categoryType = HealthKitTypeRegistry.sampleType(for: .sleepAnalysis) as? HKCategoryType else {
             throw HealthKitManagerError.unsupportedType(.sleepAnalysis)
         }
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [.strictStartDate, .strictEndDate])
+        let predicate = Self.sleepPredicate(start: start, end: end)
         let samples = try await samples(sampleType: categoryType, predicate: predicate)
         return samples.compactMap { sample in
             guard let categorySample = sample as? HKCategorySample else { return nil }
@@ -407,20 +416,7 @@ final class HealthKitManager {
         let samples = try await samples(sampleType: workoutType, predicate: predicate)
         return samples.compactMap { sample in
             guard let workout = sample as? HKWorkout else { return nil }
-            let energy = workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())
-            return HealthWorkoutSampleDTO(
-                uuid: workout.uuid,
-                activityType: activityName(workout.workoutActivityType),
-                startAt: workout.startDate,
-                endAt: workout.endDate,
-                durationSeconds: workout.duration,
-                totalEnergyKcal: energy,
-                activeEnergyKcal: energy,
-                distanceMeters: workout.totalDistance?.doubleValue(for: .meter()),
-                sourceName: workout.sourceRevision.source.name,
-                sourceBundleIdentifier: workout.sourceRevision.source.bundleIdentifier,
-                metadata: metadata(from: workout)
-            )
+            return workoutSample(from: workout)
         }
     }
 
@@ -528,7 +524,7 @@ final class HealthKitManager {
         }
     }
 
-    private func convert(samples: [HKSample], as type: HealthDataType) throws -> HealthKitFetchResult {
+    func convert(samples: [HKSample], as type: HealthDataType) throws -> HealthKitFetchResult {
         switch type {
         case .sleepAnalysis:
             let sleep = samples.compactMap { sample -> HealthSleepSampleDTO? in
@@ -547,20 +543,7 @@ final class HealthKitManager {
         case .workouts:
             let workouts = samples.compactMap { sample -> HealthWorkoutSampleDTO? in
                 guard let workout = sample as? HKWorkout else { return nil }
-                let energy = workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())
-                return HealthWorkoutSampleDTO(
-                    uuid: workout.uuid,
-                    activityType: activityName(workout.workoutActivityType),
-                    startAt: workout.startDate,
-                    endAt: workout.endDate,
-                    durationSeconds: workout.duration,
-                    totalEnergyKcal: energy,
-                    activeEnergyKcal: energy,
-                    distanceMeters: workout.totalDistance?.doubleValue(for: .meter()),
-                    sourceName: workout.sourceRevision.source.name,
-                    sourceBundleIdentifier: workout.sourceRevision.source.bundleIdentifier,
-                    metadata: metadata(from: workout)
-                )
+                return workoutSample(from: workout)
             }
             return HealthKitFetchResult(quantitySamples: [], categorySamples: [], sleepSamples: [], workoutSamples: workouts)
         default:
@@ -685,20 +668,112 @@ final class HealthKitManager {
         }
     }
 
-    private func activityName(_ type: HKWorkoutActivityType) -> String {
+    func workoutSample(from workout: HKWorkout) -> HealthWorkoutSampleDTO {
+        var workoutMetadata = metadata(from: workout)
+        workoutMetadata["hk_workout_activity_type"] = String(workout.workoutActivityType.rawValue)
+        let energy = workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())
+        return HealthWorkoutSampleDTO(
+            uuid: workout.uuid,
+            activityType: activityName(workout.workoutActivityType),
+            startAt: workout.startDate,
+            endAt: workout.endDate,
+            durationSeconds: workout.duration,
+            totalEnergyKcal: energy,
+            activeEnergyKcal: energy,
+            distanceMeters: workout.totalDistance?.doubleValue(for: .meter()),
+            sourceName: workout.sourceRevision.source.name,
+            sourceBundleIdentifier: workout.sourceRevision.source.bundleIdentifier,
+            metadata: workoutMetadata
+        )
+    }
+
+    func activityName(_ type: HKWorkoutActivityType) -> String {
         switch type {
-        case .running:
-            "running"
-        case .walking:
-            "walking"
-        case .cycling:
-            "cycling"
-        case .traditionalStrengthTraining:
-            "traditionalStrengthTraining"
-        case .functionalStrengthTraining:
-            "functionalStrengthTraining"
-        default:
-            "other"
+        case .americanFootball: "americanFootball"
+        case .archery: "archery"
+        case .australianFootball: "australianFootball"
+        case .badminton: "badminton"
+        case .baseball: "baseball"
+        case .basketball: "basketball"
+        case .bowling: "bowling"
+        case .boxing: "boxing"
+        case .climbing: "climbing"
+        case .cricket: "cricket"
+        case .crossTraining: "crossTraining"
+        case .curling: "curling"
+        case .cycling: "cycling"
+        case .dance: "dance"
+        case .danceInspiredTraining: "danceInspiredTraining"
+        case .elliptical: "elliptical"
+        case .equestrianSports: "equestrianSports"
+        case .fencing: "fencing"
+        case .fishing: "fishing"
+        case .functionalStrengthTraining: "functionalStrengthTraining"
+        case .golf: "golf"
+        case .gymnastics: "gymnastics"
+        case .handball: "handball"
+        case .hiking: "hiking"
+        case .hockey: "hockey"
+        case .hunting: "hunting"
+        case .lacrosse: "lacrosse"
+        case .martialArts: "martialArts"
+        case .mindAndBody: "mindAndBody"
+        case .mixedMetabolicCardioTraining: "mixedMetabolicCardioTraining"
+        case .paddleSports: "paddleSports"
+        case .play: "play"
+        case .preparationAndRecovery: "preparationAndRecovery"
+        case .racquetball: "racquetball"
+        case .rowing: "rowing"
+        case .rugby: "rugby"
+        case .running: "running"
+        case .sailing: "sailing"
+        case .skatingSports: "skatingSports"
+        case .snowSports: "snowSports"
+        case .soccer: "soccer"
+        case .softball: "softball"
+        case .squash: "squash"
+        case .stairClimbing: "stairClimbing"
+        case .surfingSports: "surfingSports"
+        case .swimming: "swimming"
+        case .tableTennis: "tableTennis"
+        case .tennis: "tennis"
+        case .trackAndField: "trackAndField"
+        case .traditionalStrengthTraining: "traditionalStrengthTraining"
+        case .volleyball: "volleyball"
+        case .walking: "walking"
+        case .waterFitness: "waterFitness"
+        case .waterPolo: "waterPolo"
+        case .waterSports: "waterSports"
+        case .wrestling: "wrestling"
+        case .yoga: "yoga"
+        case .barre: "barre"
+        case .coreTraining: "coreTraining"
+        case .crossCountrySkiing: "crossCountrySkiing"
+        case .downhillSkiing: "downhillSkiing"
+        case .flexibility: "flexibility"
+        case .highIntensityIntervalTraining: "highIntensityIntervalTraining"
+        case .jumpRope: "jumpRope"
+        case .kickboxing: "kickboxing"
+        case .pilates: "pilates"
+        case .snowboarding: "snowboarding"
+        case .stairs: "stairs"
+        case .stepTraining: "stepTraining"
+        case .wheelchairWalkPace: "wheelchairWalkPace"
+        case .wheelchairRunPace: "wheelchairRunPace"
+        case .taiChi: "taiChi"
+        case .mixedCardio: "mixedCardio"
+        case .handCycling: "handCycling"
+        case .discSports: "discSports"
+        case .fitnessGaming: "fitnessGaming"
+        case .cardioDance: "cardioDance"
+        case .socialDance: "socialDance"
+        case .pickleball: "pickleball"
+        case .cooldown: "cooldown"
+        case .swimBikeRun: "swimBikeRun"
+        case .transition: "transition"
+        case .underwaterDiving: "underwaterDiving"
+        case .other: "other"
+        default: "hk_\(type.rawValue)"
         }
     }
 }
