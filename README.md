@@ -208,3 +208,9 @@ npm run dev
 Local requests are appended to `web/data/testflight-requests.jsonl`, which is ignored by git. Set `TESTFLIGHT_REQUEST_WEBHOOK_URL` to forward validated requests to a production workflow.
 
 Production deployments should use durable storage. The Vercel deployment stores requests in private Vercel Blob records when Blob env vars are configured, and exposes a bearer-token-protected admin export at `/api/access-requests`. See `web/README.md` for Vercel setup, health checks, and export commands.
+
+## License
+
+Copyright 2026 megabyte0x.
+
+HealthSync is licensed under the Apache License, Version 2.0 (`Apache-2.0`). See [LICENSE](LICENSE) for the full terms.
