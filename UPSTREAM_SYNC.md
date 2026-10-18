@@ -37,3 +37,7 @@ sh scripts/sync_upstream.sh
 本地 main 更新前先确认工作区干净，再 `git pull --ff-only origin main`。不要使用 reset --hard 或强制推送覆盖本地改动。
 
 回退应用代码通过 revert 提交；CloudBase 可切回已记录的旧镜像版本。数据库迁移先审查和备份，不能通过 Git 回退直接反向删表。初始部署镜像信息见 CLOUDBASE_DEPLOYMENT.md。
+
+## IPA 命名约定
+
+后续每次编译交付 IPA，文件名必须包含应用版本号和构建号，例如 `HealthBridge-1.0.0-build12-unsigned.ipa`。版本与构建号从编译产物 Info.plist 的 CFBundleShortVersionString、CFBundleVersion 读取，避免文件名与实际版本不一致。
