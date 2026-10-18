@@ -213,3 +213,12 @@ class HealthWorkoutRecord(Base):
         Index("ix_health_workouts_device_start", "device_id", "start_at"),
         Index("ix_health_workouts_workspace_activity_start", "workspace_id", "activity_type", "start_at"),
     )
+
+
+# Added by Health Bridge: immutable HealthKit UUID deletion tombstones.
+class DeletionTombstone(Base):
+    __tablename__ = "deletion_tombstones"
+    workspace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    device_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    id: Mapped[str] = mapped_column(String(256), primary_key=True)

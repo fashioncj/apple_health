@@ -1,3 +1,4 @@
+// Modified by Health Bridge: bounded incremental page draining.
 import Foundation
 
 protocol BatchPersisting {
@@ -144,24 +145,30 @@ actor IncrementalSyncRunner {
         for type in types {
             anchors[type] = try await store.loadAnchor(for: type)
         }
-        let result: HealthKitIncrementalResult
-        do {
-            result = try await reader.fetchIncremental(types: types, anchors: anchors)
-        } catch {
+        // Drain bounded pages, persisting each before advancing its cursor.
+        for _ in 0..<20 {
+            let result: HealthKitIncrementalResult
+            do {
+                result = try await reader.fetchIncremental(types: types, anchors: anchors)
+            } catch {
+                try Task.checkCancellation()
+                try? await retryPending(configuration: configuration, now: now, calendar: calendar)
+                throw error
+            }
             try Task.checkCancellation()
-            try? await retryPending(configuration: configuration, now: now, calendar: calendar)
-            throw error
+            let batches = try await queue(result.fetchResult, deletions: result.deletions, configuration: configuration,
+                range: SyncDateRange(start: now, end: now), timezone: calendar.timeZone.identifier)
+            if batches.isEmpty {
+                try await store.appendLog(SyncLogEntry(level: .info, message: HealthSyncUserMessages.noNewSamplesFound))
+            }
+            for (type, anchor) in result.anchors {
+                try await store.saveAnchor(anchor, for: type)
+                anchors[type] = anchor
+            }
+            try await upload(batches, configuration: configuration)
+
+            if !result.hasMore { break }
         }
-        try Task.checkCancellation()
-        let batches = try await queue(result.fetchResult, deletions: result.deletions, configuration: configuration,
-            range: SyncDateRange(start: now, end: now), timezone: calendar.timeZone.identifier)
-        if batches.isEmpty {
-            try await store.appendLog(SyncLogEntry(level: .info, message: HealthSyncUserMessages.noNewSamplesFound))
-        }
-        for (type, anchor) in result.anchors {
-            try await store.saveAnchor(anchor, for: type)
-        }
-        try await upload(batches, configuration: configuration)
 
         let recentTypes = types.intersection([.stepCount, .sleepAnalysis, .workouts])
         if !recentTypes.isEmpty,

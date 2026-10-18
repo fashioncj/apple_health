@@ -1,3 +1,4 @@
+// Modified by Health Bridge: explicitly preserve SpO2 as a 0..1 fraction.
 import Foundation
 
 enum HealthDataType: String, CaseIterable, Codable, Identifiable, Equatable {
@@ -322,8 +323,10 @@ enum HealthDataType: String, CaseIterable, Codable, Identifiable, Equatable {
              .dietaryVitaminE, .dietaryVitaminK, .dietaryZinc:
             return .gram
         case .bodyFatPercentage, .atrialFibrillationBurden, .peripheralPerfusionIndex, .appleWalkingSteadiness,
-             .walkingAsymmetryPercentage, .walkingDoubleSupportPercentage, .bloodAlcoholContent, .oxygenSaturation:
+             .walkingAsymmetryPercentage, .walkingDoubleSupportPercentage, .bloodAlcoholContent:
             return .percent
+        case .oxygenSaturation:
+            return .fraction
         case .water:
             return .milliliter
         case .height, .waistCircumference, .distanceCrossCountrySkiing, .distanceCycling,

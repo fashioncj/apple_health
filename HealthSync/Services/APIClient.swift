@@ -1,3 +1,4 @@
+// Modified locally for Health Bridge: self-hosted defaults, transport or raw provenance.
 import Foundation
 
 enum HTTPStatusClassification: Equatable {
@@ -83,11 +84,21 @@ protocol SyncUploading {
     func upload(batch: SyncBatch, configuration: UploadConfiguration) async throws -> UploadResult
 }
 
+private final class HealthBridgeRedirectPolicy: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 final class APIClient: SyncUploading {
+    static let secureSession = URLSession(configuration: .ephemeral, delegate: HealthBridgeRedirectPolicy(), delegateQueue: nil)
     private let session: URLSession
     private let maxAttempts: Int
 
-    init(session: URLSession = .shared, maxAttempts: Int = 3) {
+    init(session: URLSession = APIClient.secureSession, maxAttempts: Int = 3) {
         self.session = session
         self.maxAttempts = max(1, maxAttempts)
     }
@@ -327,7 +338,7 @@ final class APIClient: SyncUploading {
     }
 
     private func sleepBeforeRetry(attempt: Int) async throws {
-        let delay = UInt64(pow(2.0, Double(attempt)) * 250_000_000)
+        let delay = UInt64(pow(2.0, Double(attempt)) * Double.random(in: 0.8...1.2) * 250_000_000)
         try await Task.sleep(nanoseconds: delay)
     }
 
@@ -337,7 +348,8 @@ final class APIClient: SyncUploading {
         guard
             let rootURL = URL(string: trimmedURL),
             let scheme = rootURL.scheme?.lowercased(),
-            ["http", "https"].contains(scheme),
+            (scheme == "https" || (scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(rootURL.host ?? ""))),
+            rootURL.user == nil, rootURL.password == nil, rootURL.query == nil, rootURL.fragment == nil,
             rootURL.host != nil
         else {
             throw APIClientError.invalidBackendURL

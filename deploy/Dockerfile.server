@@ -1,0 +1,12 @@
+ARG PYTHON_IMAGE=python:3.12-slim
+FROM ${PYTHON_IMAGE}
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY requirements.lock.txt /app/requirements.lock.txt
+RUN pip install --no-cache-dir -r requirements.lock.txt && useradd --system --uid 10001 app
+COPY backend /app/backend
+COPY bridge /app/bridge
+COPY alembic.ini /app/alembic.ini
+USER 10001
+EXPOSE 8080
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn backend.main:app --host 0.0.0.0 --port 8080 --no-access-log"]

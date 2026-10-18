@@ -1,3 +1,4 @@
+# Modified locally for Health Bridge: separate self-hosted read token.
 from __future__ import annotations
 
 import os
@@ -10,6 +11,7 @@ class Settings:
     api_token: str
     token_hash_secret: str
     hosted_public_base_url: str
+    read_token: str = ""
     hosted_provisioning_enabled: bool = False
     self_hosted_workspace_id: str = "self_hosted"
     default_page_size: int = 100
@@ -20,6 +22,9 @@ class Settings:
         database_url = os.environ.get("DATABASE_URL", "").strip()
         api_token = os.environ.get("API_TOKEN", "").strip()
         token_hash_secret = os.environ.get("TOKEN_HASH_SECRET", "").strip()
+        read_token = os.environ.get("READ_TOKEN", "").strip()
+        if not read_token or read_token == api_token:
+            raise RuntimeError("READ_TOKEN must be nonempty and different from API_TOKEN.")
         hosted_provisioning_enabled = _env_bool(os.environ.get("HOSTED_PROVISIONING_ENABLED"))
         hosted_public_base_url = os.environ.get("HOSTED_PUBLIC_BASE_URL", "").strip().rstrip("/")
         if not database_url:
@@ -31,6 +36,7 @@ class Settings:
         if hosted_provisioning_enabled and not hosted_public_base_url:
             raise RuntimeError("HOSTED_PUBLIC_BASE_URL is required when hosted provisioning is enabled.")
         return cls(
+            read_token=os.environ.get("READ_TOKEN", "").strip(),
             database_url=database_url,
             api_token=api_token,
             token_hash_secret=token_hash_secret,

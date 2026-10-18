@@ -1,3 +1,4 @@
+// Modified by Health Bridge: explicit durable SQLite writes and protected local storage.
 import Foundation
 import SQLite3
 
@@ -26,6 +27,9 @@ actor SQLiteLocalStore: BatchPersisting {
         if sqlite3_open(databaseURL.path, &db) != SQLITE_OK {
             throw SQLiteStoreError.openFailed(Self.message(from: db))
         }
+        #if os(iOS)
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: databaseURL.path)
+        #endif
         try Self.migrate(db: db)
     }
 
@@ -301,6 +305,7 @@ actor SQLiteLocalStore: BatchPersisting {
 
     private static func migrate(db: OpaquePointer?) throws {
         try execute("PRAGMA journal_mode = WAL", db: db)
+        try execute("PRAGMA synchronous = FULL", db: db)
         try execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", db: db)
         try execute("CREATE TABLE IF NOT EXISTS anchors (type TEXT PRIMARY KEY, value TEXT NOT NULL)", db: db)
         try execute("""

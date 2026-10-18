@@ -8,3 +8,10 @@ __pycache__/
 *.pyc
 *.xcuserstate
 xcuserdata/
+.env
+.env.*
+private/
+data/
+backups/
+*.log
+._*

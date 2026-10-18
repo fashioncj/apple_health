@@ -1,0 +1,1 @@
+PASS: deletion propagation, delayed replay with new export ID cannot resurrect deleted UUIDs; synthetic health samples removed.

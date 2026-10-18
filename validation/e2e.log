@@ -1,0 +1,4 @@
+Processing request of type ListToolsRequest
+Processing request of type CallToolRequest
+HTTP Request: GET http://127.0.0.1:65130/api/agent/metrics?type=oxygen_saturation&from=2026-10-17T00%3A00%3A00Z&to=2026-10-19T00%3A00%3A00Z&limit=100&offset=0 "HTTP/1.1 200 OK"
+PASS: actual HTTP auth/upload/duplicate retry, process restart persistence, MCP initialize/list_tools/call_tool with read-only token. Synthetic data only.

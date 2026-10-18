@@ -1,3 +1,4 @@
+# Modified by Health Bridge: support standalone PostgreSQL securely.
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -12,6 +13,18 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     if op.get_bind().dialect.name == "sqlite":
+        return
+
+    # Health Bridge modification: standalone PostgreSQL has no Supabase roles.
+    # Keep PUBLIC locked down without creating or depending on unrelated roles.
+    roles = set(op.get_bind().exec_driver_sql(
+        "SELECT rolname FROM pg_roles WHERE rolname IN ('anon','authenticated','service_role','postgres')"
+    ).scalars())
+    if roles != {"anon", "authenticated", "service_role", "postgres"}:
+        op.execute("REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC")
+        for objects in ("TABLES", "SEQUENCES", "FUNCTIONS"):
+            op.execute(f"REVOKE ALL PRIVILEGES ON ALL {objects} IN SCHEMA public FROM PUBLIC")
+            op.execute(f"ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON {objects} FROM PUBLIC")
         return
 
     op.execute(

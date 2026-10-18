@@ -1,0 +1,13 @@
+{
+  "existingTablesRetained": 9,
+  "addedTables": [
+    "public.healthbridge_batches",
+    "public.healthbridge_deletions",
+    "public.healthbridge_records"
+  ],
+  "existingService": "pocket-love-api",
+  "existingVersion": "009",
+  "existingConfigUnchanged": true,
+  "existingTrafficUnchanged": true,
+  "note": "OpenAccessTypes compared as a set; API return ordering varies."
+}

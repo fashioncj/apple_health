@@ -1,0 +1,8 @@
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 20260531_0001
+INFO  [alembic.runtime.migration] Running upgrade 20260531_0001 -> 20260531_0002
+INFO  [alembic.runtime.migration] Running upgrade 20260531_0002 -> 20260531_0003
+INFO  [alembic.runtime.migration] Running upgrade 20260531_0003 -> 20260605_0004
+INFO  [alembic.runtime.migration] Running upgrade 20260605_0004 -> 20260729_0005
+INFO  [alembic.runtime.migration] Running upgrade 20260729_0005 -> 20261018_0006, Health Bridge: durable deletion tombstones.

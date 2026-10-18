@@ -1,3 +1,4 @@
+# Modified locally for Health Bridge: separate self-hosted read token.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -42,6 +43,8 @@ def resolve_sync_auth(db: Session, settings: Settings, authorization: str | None
 
 def resolve_agent_auth(db: Session, settings: Settings, authorization: str | None) -> AuthContext:
     token = bearer_token(authorization)
+    if settings.read_token and secrets.compare_digest(token.encode(), settings.read_token.encode()):
+        return AuthContext(workspace_id=settings.self_hosted_workspace_id, token_kind="agent_read")
     return resolve_access_token(db, settings, token, expected_kind="agent_read")
 
 

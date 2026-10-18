@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-healthsync}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "${POSTGRES_HOST_PORT:-15432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
     volumes:
       - healthsync-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -22,6 +22,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-healthsync}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-healthsync}
       API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
+      READ_TOKEN: ${READ_TOKEN:?Set READ_TOKEN in .env}
       TOKEN_HASH_SECRET: ${TOKEN_HASH_SECRET:?Set TOKEN_HASH_SECRET in .env}
       HOSTED_PUBLIC_BASE_URL: ${HOSTED_PUBLIC_BASE_URL:-}
       HOSTED_PROVISIONING_ENABLED: ${HOSTED_PROVISIONING_ENABLED:-false}
@@ -29,7 +30,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "${API_HOST_PORT:-8080}:8080"
+      - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
 
 volumes:
   healthsync-postgres-data:

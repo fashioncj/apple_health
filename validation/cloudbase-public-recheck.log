@@ -1,0 +1,5 @@
+Processing request of type ListToolsRequest
+Processing request of type CallToolRequest
+HTTP Request: GET https://health-sync-api-320599-7-1251732889.sh.run.tcloudbase.com/api/agent/metrics?type=oxygen_saturation&from=2026-10-18T00%3A00%3A00Z&to=2026-10-19T00%3A00%3A00Z&limit=500&offset=0 "HTTP/1.1 200 OK"
+PASS: verify public trusted HTTPS, five original sample types, auth scope isolation, idempotency/conflict checks, timestamps/provenance, pagination and sync freshness.
+PASS: official MCP initialize/list_tools/call_tool -> public CloudRun -> real CloudBase PG, using only read token.

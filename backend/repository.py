@@ -1,3 +1,4 @@
+# Modified by Health Bridge: prevent delayed retries resurrecting deleted samples.
 from __future__ import annotations
 
 from collections import defaultdict
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from .config import Settings
 from .models import (
     AccessTokenRecord,
+    DeletionTombstone,
     DeviceRecord,
     HealthMetricRecord,
     HealthWorkoutRecord,
@@ -142,6 +144,7 @@ def delete_hosted_workspace_rows(db: Session, workspace_id: str) -> None:
         SyncBatchRecord,
         WorkspaceDeviceRecord,
         AccessTokenRecord,
+    DeletionTombstone,
     ):
         db.query(model).filter(model.workspace_id == workspace_id).delete(synchronize_session=False)
     db.query(WorkspaceRecord).filter(WorkspaceRecord.id == workspace_id).delete(synchronize_session=False)
@@ -216,6 +219,11 @@ def persist_sync_payload(
             batch.workouts_count = len(payload.workouts)
 
         for deletion in payload.deletions:
+            tombstone_key = (workspace_id, payload.device_id, deletion.kind, deletion.id)
+            if db.get(DeletionTombstone, tombstone_key) is None:
+                db.add(DeletionTombstone(workspace_id=workspace_id, device_id=payload.device_id,
+                    kind=deletion.kind, id=deletion.id))
+                db.flush()
             model = HealthWorkoutRecord if deletion.kind == "workout" else HealthMetricRecord
             deleted += (
                 db.query(model)
@@ -228,6 +236,9 @@ def persist_sync_payload(
             )
 
         for metric in payload.metrics:
+            if db.get(DeletionTombstone, (workspace_id, payload.device_id, "metric", metric.id)):
+                duplicates += 1
+                continue
             record = db.get(HealthMetricRecord, (workspace_id, payload.device_id, metric.id))
             if record is None:
                 db.add(
@@ -259,6 +270,9 @@ def persist_sync_payload(
                 record.export_id = export_id
 
         for workout in payload.workouts:
+            if db.get(DeletionTombstone, (workspace_id, payload.device_id, "workout", workout.id)):
+                duplicates += 1
+                continue
             record = db.get(HealthWorkoutRecord, (workspace_id, payload.device_id, workout.id))
             if record is None:
                 db.add(

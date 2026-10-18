@@ -1,0 +1,1 @@
+PASS: CloudBase PG atomic ingest, batch replay dedupe, real stored five types, deterministic pagination, microsecond timestamp/source/metadata preservation. Synthetic fixture saved for cleanup.

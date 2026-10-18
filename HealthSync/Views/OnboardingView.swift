@@ -1,7 +1,8 @@
+// Modified locally for Health Bridge: self-hosted defaults, transport or raw provenance.
 import SwiftUI
 
 enum OnboardingStorageDisclosure {
-    static let message = "Continue creates private hosted storage, then requests Health access. You can switch to your own backend later."
+    static let message = "仅请求健康读取权限。随后在 Settings 填入你自己的 HTTPS 地址和上传令牌，数据才会上传。"
 }
 
 struct OnboardingView: View {
@@ -48,7 +49,7 @@ struct OnboardingView: View {
                         FeatureRow(
                             icon: "externaldrive.badge.checkmark",
                             iconColor: HealthSyncTheme.primaryBlue,
-                            title: "Private hosted storage",
+                            title: "自托管存储",
                             description: OnboardingStorageDisclosure.message
                         )
 

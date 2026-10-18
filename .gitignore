@@ -20,3 +20,18 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 web/*.tsbuildinfo
+.env.local
+data/
+.venv/
+
+private/
+
+# Local credentials, health data, build and synchronization workspaces
+.env.*
+!.env.example
+!**/.env.example
+*.private.json
+*.sqlite
+*.sqlite-*
+*.db
+.sync-work/

@@ -1,3 +1,4 @@
+// Modified by Health Bridge for self-hosted defaults.
 import XCTest
 import HealthKit
 @testable import HealthSync
@@ -520,13 +521,13 @@ final class APIClientTests: XCTestCase {
 
 final class AppSettingsHostedEndpointTests: XCTestCase {
     func testCleanInstallDefaultsToHostedStorageSoManualSyncHasASetupPath() {
-        XCTAssertEqual(AppSettings.default.storageMode, .hostedHealthSync)
-        XCTAssertEqual(AppSettings.default.effectiveBackendURL, AppSettings.hostedBackendURL)
+        XCTAssertEqual(AppSettings.default.storageMode, .customBackend)
+        XCTAssertEqual(AppSettings.default.effectiveBackendURL, "")
         XCTAssertEqual(AppSettings.default.syncFrequency, .hourlyBestEffort)
     }
 
     func testDefaultSettingsSelectEverySupportedHealthDataType() {
-        XCTAssertEqual(AppSettings.default.selectedTypes, Set(HealthDataType.allCases))
+        XCTAssertEqual(AppSettings.default.selectedTypes, [.oxygenSaturation, .heartRate, .hrvSDNN, .sleepAnalysis, .respiratoryRate])
     }
 
     func testHealthMetricCategoriesCoverEverySupportedTypeExactlyOnce() {
@@ -654,7 +655,7 @@ final class OnboardingStorageDisclosureTests: XCTestCase {
     func testDisclosureExplainsAutomaticHostedStorageBeforeHealthAccess() {
         XCTAssertEqual(
             OnboardingStorageDisclosure.message,
-            "Continue creates private hosted storage, then requests Health access. You can switch to your own backend later."
+            "仅请求健康读取权限。随后在 Settings 填入你自己的 HTTPS 地址和上传令牌，数据才会上传。"
         )
     }
 }
