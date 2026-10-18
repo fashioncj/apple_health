@@ -56,7 +56,7 @@ def test_invalid_payload_is_rejected_without_echoing_sample(setup,change):
     elif change=='nan':p['metrics'][0]['value']='NaN'
     else:p['metrics']=p['metrics']*1001
     r=c.post('/api/apple-health/sync',json=p,headers=U)
-    assert r.status_code==422 and r.json()=={'detail':'Invalid request payload'} and s.calls==[]
+    assert r.status_code==422 and r.json()['detail']=='Invalid request payload' and r.json()['errors'] and s.calls==[]
 
 def test_no_context_or_env_echo(setup):
     c,s=setup
@@ -82,3 +82,11 @@ async def test_gateway_errors_do_not_leak_key_or_payload():
 
 @pytest.fixture
 def anyio_backend():return 'asyncio'
+
+
+def test_validation_diagnostics_hide_values_and_unknown_keys(setup):
+    c,s=setup;p=sample();p['SECRET_FIELD_NAME']='SECRET_VALUE'
+    r=c.post('/api/apple-health/sync',json=p,headers=U)
+    assert r.status_code==422
+    assert r.json()['errors']==[{'field':'body.<field>','code':'extra_forbidden'}]
+    assert 'SECRET' not in r.text and not s.calls

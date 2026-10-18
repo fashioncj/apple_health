@@ -1,7 +1,7 @@
 """Health-only API. PG access is through fixed CloudBase RPCs; no TCP/ORM or shared app migrations."""
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-import hashlib,json,os,secrets
+import hashlib,json,os,secrets,logging
 import httpx
 from fastapi import FastAPI,Depends,Header,HTTPException,Query
 from fastapi.exceptions import RequestValidationError
@@ -70,7 +70,18 @@ def create_app(settings=None,gateway=None):
     app.add_middleware(BodyLimit)
 
     @app.exception_handler(RequestValidationError)
-    async def invalid(request,exc):return JSONResponse({'detail':'Invalid request payload'},status_code=422)
+    async def invalid(request,exc):
+        # Never include validation input, values, exception context, or unknown field names.
+        allowed = {'body','query','metrics','workouts','deletions','date_range',
+                   'device_id','export_id','generated_at','timezone','source','schema_version',
+                   'id','type','value','unit','start_at','end_at','source_name','source_bundle_id',
+                   'metadata','activity_type','duration_seconds','total_energy_kcal',
+                   'active_energy_kcal','distance_meters','start','end','kind','limit','offset','from','to'}
+        errors = [{'field': '.'.join(str(v) if isinstance(v,int) or v in allowed else '<field>'
+                                    for v in e['loc']), 'code': e['type']}
+                  for e in exc.errors()[:10]]
+        logging.getLogger('healthbridge.validation').warning('Rejected request fields: %s', json.dumps(errors))
+        return JSONResponse({'detail':'Invalid request payload','errors':errors},status_code=422)
 
     def check(value,expected):
         if not value or not value.startswith('Bearer '):raise HTTPException(401,'Bearer token required')
