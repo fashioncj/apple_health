@@ -1,0 +1,30 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "apple-health": {
+      "type": "streamable-http",
+      "url": "https://healthsync.zgdnz.cc/health/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "dcr"
+            },
+            "authorizationUrl": "https://healthsync.zgdnz.cc/health/authorize",
+            "tokenUrl": "https://healthsync.zgdnz.cc/health/token",
+            "registrationUrl": "https://healthsync.zgdnz.cc/health/register",
+            "authorizationServerBase": "https://healthsync.zgdnz.cc/health",
+            "resource": "https://healthsync.zgdnz.cc/health/mcp",
+            "baseScopes": [
+              "openid",
+              "profile",
+              "offline_access"
+            ],
+            "oidcEnabled": false
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "apple-health",
+  "version": "0.1.0",
+  "description": "Read-only personal Apple Health and Apple Watch queries with Casdoor authorization.",
+  "author": {
+    "name": "fashioncj"
+  },
+  "repository": "https://github.com/fashioncj/apple_health",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Apple Health 健康助手",
+        "shortDescription": "查询自托管健康数据，区分逐条样本与每日汇总",
+        "longDescription": "只读查询血氧、HRV SDNN、心率、睡眠阶段、呼吸频率及运动记录。通过个人 Casdoor 账号授权；不向模型提供数据库密钥。",
+        "developerName": "fashioncj",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "看看我昨晚的逐条血氧和 HRV，注明数据时间与来源。"
+        ],
+        "logo": "./assets/icon.png",
+        "composerIcon": "./assets/icon.png"
+      }
+    }
+  },
+  "license": "Apache-2.0"
+}

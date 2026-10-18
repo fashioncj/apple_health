@@ -62,10 +62,22 @@ class BodyLimit:
 def create_app(settings=None,gateway=None):
     settings=settings or Settings.from_env()
     storage=gateway or Gateway(settings)
+    remote_bundle = None
+    if os.environ.get('HEALTH_MCP_ENABLED') == '1':
+        from remote_mcp import MCPSettings, create_remote_mcp
+        remote_bundle = create_remote_mcp(storage, MCPSettings.from_env())
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        if hasattr(storage,'close'):await storage.close()
+        try:
+            if remote_bundle:
+                async with remote_bundle[1].router.lifespan_context(remote_bundle[1]):
+                    yield
+            else:
+                yield
+        finally:
+            if remote_bundle:
+                await remote_bundle[2].client.aclose()
+            if hasattr(storage,'close'):await storage.close()
     app=FastAPI(title='Health Bridge',version='2.0',docs_url=None,redoc_url=None,openapi_url=None,lifespan=lifespan)
     app.add_middleware(BodyLimit)
 
@@ -123,4 +135,6 @@ def create_app(settings=None,gateway=None):
     @app.get('/api/agent/syncs',dependencies=[Depends(read_auth)])
     async def syncs(start:AwareDatetime|None=Query(None,alias='from'),to:AwareDatetime|None=None,limit:int=Query(100,ge=1,le=500),offset:int=Query(0,ge=0)):
         return await read('sync',None,start,to,limit,offset)
+    if remote_bundle:
+        app.mount('/', remote_bundle[1])
     return app

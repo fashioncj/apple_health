@@ -1,0 +1,7 @@
+2026-10-19 health-sync-api-006 normal, 100% traffic
+MCP anonymous 401 with prefixed resource_metadata
+Resource discovery 200; authorization discovery 200
+DCR 201; PKCE authorization -> consent 302
+Swift v2 upload, persisted read, duplicate retry, cleanup PASS; v1 empty test PASS
+Real Casdoor login, refresh and ChatGPT authenticated tools: pending user consent
+Plugin: Plugin_f43bea160bc48191ad525fd2c5ba9999 version 0.1.0
