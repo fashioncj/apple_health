@@ -90,3 +90,25 @@ def test_validation_diagnostics_hide_values_and_unknown_keys(setup):
     assert r.status_code==422
     assert r.json()['errors']==[{'field':'body.<field>','code':'extra_forbidden'}]
     assert 'SECRET' not in r.text and not s.calls
+
+
+@pytest.mark.parametrize('version',[1,2])
+def test_supported_schema_versions_are_preserved(setup,version):
+    c,s=setup;p=sample();p['schema_version']=version
+    assert c.post('/api/apple-health/sync',headers=U,json=p).status_code==200
+    assert s.calls[-1][1]['p_batch']['schema_version']==version
+
+def test_unknown_schema_version_is_rejected(setup):
+    c,s=setup;p=sample();p['schema_version']=3
+    assert c.post('/api/apple-health/sync',headers=U,json=p).status_code==422
+    assert not s.calls
+
+def test_actual_swift_normalizer_payload(setup):
+    from pathlib import Path
+    p=json.loads((Path(__file__).resolve().parents[2]/'validation/swift-native-v2.json').read_text())
+    c,s=setup
+    assert p['schema_version']==2
+    r=c.post('/api/apple-health/sync',headers=U,json=p)
+    assert r.status_code==200
+    assert s.calls[-1][1]['p_batch']['schema_version']==2
+    assert s.calls[-1][1]['p_batch']['metrics'][0]['value']==.975

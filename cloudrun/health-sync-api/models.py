@@ -59,7 +59,7 @@ class Batch(BaseModel):
     generated_at: AwareDatetime
     timezone: str = Field(max_length=100)
     source: str = Field(max_length=200)
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     date_range: DateRange
     metrics: list[Metric] = Field(default_factory=list,max_length=1000)
     workouts: list[Workout] = Field(default_factory=list,max_length=1000)

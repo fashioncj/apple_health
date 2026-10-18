@@ -21,3 +21,7 @@
 服务器部署追加：deploy/compose.server.yml、非 root API 镜像、独立 PostgreSQL、Nginx HTTPS 入口和备份脚本；0004 迁移在缺少 Supabase 专用角色时收紧 PUBLIC 权限，兼容普通 PostgreSQL。实际部署结果见 SERVER_DEPLOYMENT.md。
 
 CloudBase 最终实现：cloudrun/health-sync-api 新增独立无状态 API；cloudbase/migrations 增加三个 healthbridge_ 表与事务/查询 RPC。API 使用 HTTPS 数据库网关，健康表无匿名/普通应用用户访问权限。新永久后台Key经用户明确确认，独立上传/只读令牌与数据库Key分离。没有运行旧schema全局权限迁移。
+
+### 2026-10-18 实机协议兼容修复
+
+CloudBase 接收 schema_version 1（连接测试）和 2（HealthNormalizer 真实同步），原先仅接受 1 会导致实机同步 422。保留输入版本，不降级或丢弃字段。新增实际 Swift 生成的合成 v2 合约样本及回归测试，未知版本仍拒绝。脱敏校验日志仅记录字段位置和错误类型。
