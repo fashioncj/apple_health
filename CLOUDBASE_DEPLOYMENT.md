@@ -98,3 +98,7 @@ PYTHONPATH=scripts .venv/bin/python scripts/cloudbase_e2e.py cleanup
 cd cloudrun/health-sync-api
 ../../../.venv/bin/python -m pytest test_api.py -q
 ```
+
+## v003 协议兼容修复（2026-10-18）
+
+真实 iOS 同步使用 schema_version=2，连接测试使用 1。后端现兼容两者，未知版本仍拒绝。16 项 API 测试通过，实际 Swift 合成 v2 请求在公网上传 HTTP 200，已验证持久化、重复去重和 v1 空批次兼容，测试样本已清理。当前部署标识见 cloudbase/deployment.json。

@@ -3,6 +3,8 @@
   "region": "ap-shanghai",
   "service": "health-sync-api",
   "baseUrl": "https://health-sync-api-320599-7-1251732889.sh.run.tcloudbase.com",
-  "buildId": 2608907259,
-  "runId": "multi_tenant_1xIQcmrjanUe45"
+  "buildId": 2608912000,
+  "runId": "multi_tenant_1xIRVHW6bTcqDK",
+  "version": "003",
+  "image": "ccr.ccs.tencentyun.com/tcb-276333112-luni/ca-csmqcvvc_health-sync-api:health-sync-api-003-20261018220448"
 }
