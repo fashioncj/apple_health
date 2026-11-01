@@ -27,3 +27,9 @@ HealthKitManager 的冲突仅涉及历史聚合策略。按用户最新指示，
 - 无冲突标记，git diff --check 通过。
 
 本次不会合并 main、部署 CloudBase 或运行数据库迁移；需用户审阅候选后另行决定。
+
+## 最终方案修订：iOS 直接采用上游 main
+
+本节覆盖前文的 iOS 定制保留说明。HealthSync、HealthSync.xcodeproj、Tests/HealthSyncTests 与 upstream/main eaa53fe 完全一致，git diff 无差异。CloudBase/MCP、后端和维护脚本独立保留。iOS 不再默认自托管或原始回填，需在界面手动选择。
+
+最终验证：后端28通过；CloudBase/MCP28通过（新增真实上游Swift生成的合成v2 payload接收/字段保真测试）；Swift归一化与JSON验证通过；Xcode无签名build-for-testing通过。先前112项模拟器测试属于修改前候选，不能作为本次完全上游客户端的执行结果：最终复查时机器没有可用Simulator runtime，因此本版iOS XCTest仅编译通过，未重新执行。未部署、未读取真实健康数据。

@@ -4,7 +4,7 @@ struct BackfillView: View {
     @EnvironmentObject private var appState: AppState
     @State private var startDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
     @State private var endDate = Date()
-    @State private var dataMode: BackfillDataMode = .rawSamples
+    @State private var dataMode: BackfillDataMode = .dailySummary
 
     var body: some View {
         ScrollView {

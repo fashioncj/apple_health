@@ -112,3 +112,21 @@ def test_actual_swift_normalizer_payload(setup):
     assert r.status_code==200
     assert s.calls[-1][1]['p_batch']['schema_version']==2
     assert s.calls[-1][1]['p_batch']['metrics'][0]['value']==.975
+
+def test_unmodified_upstream_swift_contract(setup):
+    from pathlib import Path
+    c, storage = setup
+    p = json.loads((Path(__file__).resolve().parents[2] / 'validation/upstream-swift-v2.json').read_text())
+    r = c.post('/api/apple-health/sync', headers=U, json=p)
+    assert r.status_code == 200
+    received = storage.calls[0][1]['p_batch']
+    assert received['schema_version'] == 2
+    from datetime import datetime
+    for actual, expected in zip(received['metrics'], p['metrics'], strict=True):
+        for key, value in expected.items():
+            if key in ('start_at', 'end_at'):
+                assert datetime.fromisoformat(actual[key]) == datetime.fromisoformat(value)
+            else:
+                assert actual[key] == value
+    oxygen = next(m for m in received['metrics'] if m['type'] == 'oxygen_saturation')
+    assert oxygen['value'] == 0.975 and oxygen['unit'] == 'percent'

@@ -1,4 +1,3 @@
-// Modified locally for Health Bridge: self-hosted defaults, transport or raw provenance.
 import Foundation
 
 enum BackfillDataMode: String, CaseIterable, Identifiable {
@@ -48,8 +47,6 @@ enum BackgroundSyncSchedule {
 
 enum StorageMode: String, CaseIterable, Codable, Identifiable {
     case customBackend
-
-    static var allCases: [StorageMode] { [.customBackend] }
     case hostedHealthSync
 
     var id: String { rawValue }
@@ -70,7 +67,7 @@ enum StorageMode: String, CaseIterable, Codable, Identifiable {
 }
 
 struct AppSettings: Codable, Equatable {
-    static let hostedBackendURL = "https://disabled.invalid"
+    static let hostedBackendURL = "https://dtzydnjnqkruxaacgkio.supabase.co/functions/v1/healthsync"
 
     var backendURL: String
     var selectedTypes: Set<HealthDataType>
@@ -92,10 +89,10 @@ struct AppSettings: Codable, Equatable {
 
     static let `default` = AppSettings(
         backendURL: "",
-        selectedTypes: [.oxygenSaturation, .heartRate, .hrvSDNN, .sleepAnalysis, .respiratoryRate],
+        selectedTypes: Set(HealthDataType.allCases),
         syncFrequency: .hourlyBestEffort,
         hasRequestedHealthPermissions: false,
-        storageMode: .customBackend,
+        storageMode: .hostedHealthSync,
         hostedWorkspaceID: nil,
         hostedAgentEndpoint: nil
     )

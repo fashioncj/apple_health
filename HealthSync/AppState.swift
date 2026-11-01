@@ -391,7 +391,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    func backfill(start: Date, end: Date, mode: BackfillDataMode = .rawSamples) async {
+    func backfill(start: Date, end: Date, mode: BackfillDataMode = .dailySummary) async {
         guard end > start else { return }
         backfillProgress = 0
         backfillError = nil

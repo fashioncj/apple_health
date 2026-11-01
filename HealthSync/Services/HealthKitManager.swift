@@ -1,4 +1,3 @@
-// Modified locally for Health Bridge: self-hosted defaults, transport or raw provenance.
 import Foundation
 import HealthKit
 
@@ -19,7 +18,6 @@ struct HealthKitIncrementalResult: Equatable {
     let fetchResult: HealthKitFetchResult
     let anchors: [HealthDataType: String]
     let deletions: [HealthRecordDeletion]
-    var hasMore: Bool = false
 }
 
 enum BackfillQuantityAggregationStrategy: String {
@@ -254,7 +252,6 @@ final class HealthKitManager: HealthKitSyncReading {
         var fetchResult = HealthKitFetchResult.empty
         var updatedAnchors: [HealthDataType: String] = [:]
         var deletions: Set<HealthRecordDeletion> = []
-        var hasMore = false
 
         for type in types {
             guard let sampleType = HealthKitTypeRegistry.sampleType(for: type) else {
@@ -273,7 +270,6 @@ final class HealthKitManager: HealthKitSyncReading {
             guard let newAnchor else {
                 throw HealthKitManagerError.missingAnchor
             }
-            hasMore = hasMore || samples.count + deletedObjects.count >= 1000
             updatedAnchors[type] = try encodeAnchor(newAnchor)
             let converted = try await convert(samples: samples, as: type)
             fetchResult.quantitySamples += converted.quantitySamples
@@ -286,8 +282,7 @@ final class HealthKitManager: HealthKitSyncReading {
         return HealthKitIncrementalResult(
             fetchResult: fetchResult,
             anchors: updatedAnchors,
-            deletions: deletions.sorted { ($0.kind.rawValue, $0.id) < ($1.kind.rawValue, $1.id) },
-            hasMore: hasMore
+            deletions: deletions.sorted { ($0.kind.rawValue, $0.id) < ($1.kind.rawValue, $1.id) }
         )
     }
 
@@ -510,7 +505,7 @@ final class HealthKitManager: HealthKitSyncReading {
                 type: type,
                 predicate: nil,
                 anchor: anchor,
-                limit: 1000
+                limit: HKObjectQueryNoLimit
             ) { _, samples, deletedObjects, newAnchor, error in
                 if let error {
                     continuation.resume(throwing: HealthKitManagerError.map(error))
@@ -662,23 +657,9 @@ final class HealthKitManager: HealthKitSyncReading {
     }
 
     private func metadata(from sample: HKSample) -> [String: String] {
-        var result = sample.metadata?.reduce(into: [String: String]()) { result, item in
+        sample.metadata?.reduce(into: [:]) { result, item in
             result[item.key] = String(describing: item.value)
         } ?? [:]
-        if let quantity = sample as? HKQuantitySample {
-            result["healthbridge.quantity_description"] = String(describing: quantity.quantity)
-            result["healthbridge.quantity_type"] = quantity.quantityType.identifier
-        }
-        if let category = sample as? HKCategorySample {
-            result["healthbridge.category_value"] = String(category.value)
-        }
-        result["healthbridge.start_epoch_seconds"] = String(sample.startDate.timeIntervalSince1970)
-        result["healthbridge.end_epoch_seconds"] = String(sample.endDate.timeIntervalSince1970)
-        result["healthbridge.source_version"] = sample.sourceRevision.version
-        result["healthbridge.product_type"] = sample.sourceRevision.productType
-        result["healthbridge.os_version"] = String(describing: sample.sourceRevision.operatingSystemVersion)
-        result["healthbridge.device"] = sample.device.map { String(describing: $0) }
-        return result
     }
 
     func backfillAggregationStrategy(for type: HealthDataType, mode: BackfillDataMode) -> BackfillQuantityAggregationStrategy? {

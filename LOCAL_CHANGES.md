@@ -29,3 +29,7 @@ CloudBase 接收 schema_version 1（连接测试）和 2（HealthNormalizer 真�
 ### 2026-11-01 上游同步候选
 
 PR #11 已合入上游，删除本地“所有历史数量指标强制逐条”的重复策略，原样复用上游的血氧/HRV 原始历史分页实现和测试。仅将历史界面及 AppState 默认模式改为 rawSamples；其他数量指标保留上游每日统计，避免多设备重叠累计。保留原始来源 metadata、1000 条增量分页、队列/游标、SpO₂ fraction、安全传输、删除墓碑及 CloudBase/MCP。上游 #12 的 workspace_id 和稳定分页修复同时合入旧后端代码；未部署服务或运行数据库迁移。
+
+### 2026-11-01：iOS 改为直接采用上游
+
+按用户决定，将 HealthSync、工程和 iOS 测试全部恢复为上游 eaa53fe；之前记录的 iOS 默认值、HTTPS限制、fraction单位、额外metadata、增量分页和本地存储定制已移除，不再维护。保留 CloudBase/Casdoor/MCP 和独立后端。Swift 合成协议验证改为真实上游 percent 格式，并新增后端接收该合成payload的回归测试。历史详情选项须用户显式选择。

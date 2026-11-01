@@ -4,10 +4,11 @@ import Foundation
     static func main() throws {
         let start = Date(timeIntervalSince1970: 1780218000.123456)
         let source = "Apple Watch"
-        let sample = HealthQuantitySampleDTO(uuid: UUID(), type: .oxygenSaturation, value: 0.975, unit: .fraction, startAt: start, endAt: start.addingTimeInterval(0.2), sourceName: source, sourceBundleIdentifier: "com.apple.health", metadata: ["original_epoch": String(start.timeIntervalSince1970)])
+        let sample = HealthQuantitySampleDTO(uuid: UUID(), type: .oxygenSaturation, value: 0.975, unit: .percent, startAt: start, endAt: start.addingTimeInterval(0.2), sourceName: source, sourceBundleIdentifier: "com.apple.health", metadata: ["original_epoch": String(start.timeIntervalSince1970)])
         let metric = try HealthNormalizer().metrics(from: [sample])[0]
         precondition(metric.type == "oxygen_saturation")
-        precondition(metric.value == 0.975) // Registry uses fraction; do not silently scale.
+        precondition(metric.value == 0.975) // Upstream HealthKit percent() uses 0..1; preserve the wire value.
+        precondition(metric.unit == "percent")
         precondition(metric.sourceName == source && metric.endAt > metric.startAt)
         let roundtrip = try PayloadJSON.decoder.decode(HealthMetric.self, from: PayloadJSON.encoder.encode(metric))
         precondition(roundtrip.metadata == metric.metadata)
