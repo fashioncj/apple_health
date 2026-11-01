@@ -4,15 +4,15 @@ HealthSync is a native SwiftUI iOS app that reads selected Apple Health data on-
 
 There is no iCloud or server-side Apple Health REST API. Apple Health reads happen only on the iPhone after the user grants HealthKit read permissions. Health data stays on-device until the user accepts the default private hosted destination or configures a backend URL and auth token.
 
-Website: https://healthysync.megabyte.sh
+Website: https://healthysync.app
 
-User documentation: https://healthysync.megabyte.sh/docs
+User documentation: https://healthysync.app/docs
 
-Apple Health app sync guide: https://healthysync.megabyte.sh/apple-health-app-sync
+Apple Health app sync guide: https://healthysync.app/apple-health-app-sync
 
-Privacy policy: https://healthysync.megabyte.sh/privacy
+Privacy policy: https://healthysync.app/privacy
 
-Support: https://healthysync.megabyte.sh/support
+Support: https://healthysync.app/support
 
 ## What It Syncs
 
@@ -71,6 +71,26 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 python3 -m pytest Tests/backend/test_backend_api.py -q
 ```
+
+### Historical sync detail
+
+Historical Sync offers **Daily summaries** (the existing default) or **Original blood
+oxygen & HRV**. The latter exports individual blood oxygen and HRV records, retaining
+sample UUIDs, timestamps, source attribution, units, and metadata. All other quantity
+metrics retain daily sums/averages, including steps, energy, distance, and heart rate.
+This preserves HealthKit statistics' overlap handling for cumulative metrics.
+
+Both modes retain 30-day date windows. Blood oxygen and HRV in original mode are read
+in bounded 100-record HealthKit pages; each page is queued and uploaded before the next
+read. The existing durable queue, upload chunking, retries, and deduplication are reused.
+Workouts and category samples crossing a window boundary are selected by start time in
+original mode and retain their full end time. Sleep keeps its existing overlap query.
+Empty windows do not each add a log row; a completely empty backfill logs once.
+
+Large ranges can take longer; keep the app open while backfilling. Existing summary
+records are not deleted. The backend summary view prefers existing aggregates; consumers
+requiring original records should distinguish `metadata.aggregation` rather than add
+summaries to samples. Blood oxygen records are discrete, not continuous monitoring.
 
 ## Backend Contract
 

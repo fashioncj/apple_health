@@ -1,3 +1,5 @@
+export const dynamic = "force-static";
+
 import { guides } from "@/lib/docs";
 import { absoluteUrl } from "@/lib/site";
 

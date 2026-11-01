@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Analytics } from "@vercel/analytics/next";
 import {
   absoluteUrl,
   APP_STORE_URL,
@@ -53,6 +52,8 @@ export const metadata: Metadata = {
     "sync Apple Health data",
     "self-hosted health data"
   ],
+  applicationName: SITE_NAME,
+  category: "health data synchronization",
   alternates: {
     canonical: "/"
   },
@@ -62,6 +63,7 @@ export const metadata: Metadata = {
       "Privacy-first iOS Apple Health sync for selected HealthKit data and private API endpoints.",
     url: "/",
     siteName: "HealthSync",
+    locale: "en_US",
     type: "website",
     images: [
       {
@@ -92,13 +94,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="alternate" type="text/plain" href="/llms.txt" title="HealthSync documentation for AI assistants" />
+      </head>
       <body>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(siteStructuredData) }}
         />
         {children}
-        <Analytics />
       </body>
     </html>
   );

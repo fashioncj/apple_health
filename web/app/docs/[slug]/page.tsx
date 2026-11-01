@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { findGuide, guides, type DocBlock } from "@/lib/docs";
+import { absoluteUrl, ORGANIZATION_ID } from "@/lib/site";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -39,6 +40,20 @@ export default async function GuidePage({ params }: Props) {
   const nextGuide = guides[guides.indexOf(guide) + 1];
   return (
     <article>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "TechArticle",
+          "@id": absoluteUrl(`/docs/${slug}#article`),
+          url: absoluteUrl(`/docs/${slug}`),
+          headline: guide.title,
+          description: guide.description,
+          inLanguage: "en",
+          publisher: { "@id": ORGANIZATION_ID },
+          mainEntityOfPage: absoluteUrl(`/docs/${slug}`)
+        }).replace(/</g, "\\u003c") }}
+      />
       <p className="resource-kicker">Documentation</p>
       <h1>{guide.title}</h1>
       <p className="docs-lede">{guide.description}</p>

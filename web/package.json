@@ -4,13 +4,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "wrangler pages dev out",
     "typecheck": "tsc --noEmit",
-    "health": "node scripts/health-check.mjs"
+    "health": "node scripts/health-check.mjs",
+    "deploy": "wrangler pages deploy out --project-name healthysync --branch main"
   },
   "dependencies": {
-    "@vercel/analytics": "^2.0.1",
-    "next": "16.2.7",
+    "next": "16.4.2",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
@@ -18,9 +18,10 @@
     "@types/node": "25.9.1",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "wrangler": "4.151.3"
   },
   "overrides": {
-    "postcss": "8.5.15"
+    "postcss": "8.5.23"
   }
 }

@@ -2,7 +2,7 @@
 
 This backend stores HealthSync uploads in Postgres and exposes read APIs for synced metrics, workouts, and sync batches.
 
-For the public walkthroughs, see [server setup](https://healthysync.megabyte.sh/docs/self-hosting), [operations](https://healthysync.megabyte.sh/docs/operations), and [agent access](https://healthysync.megabyte.sh/docs/agent-access).
+For the public walkthroughs, see [server setup](https://healthysync.app/docs/self-hosting), [operations](https://healthysync.app/docs/operations), and [agent access](https://healthysync.app/docs/agent-access).
 
 The iOS app already sends the correct request shape:
 
@@ -169,12 +169,15 @@ curl -H "Authorization: Bearer $AGENT_TOKEN" \
 The agent response includes raw records plus digest fields designed for AI tools:
 
 - `agent_schema_version`
+- `workspace_id`, derived from the agent token
 - `page.limit`, `page.offset`, and `page.has_more`
 - `catalog.metric_types`, `catalog.activity_types`, `catalog.timezones`, and `catalog.devices`
 - `metrics[].timezone` and `metrics[].local_date`
 - `workouts[].timezone` and `workouts[].local_date`
 - `metric_daily_summaries`
 - `workout_daily_summaries`
+
+`/api/agent/metrics`, `/workouts`, and `/syncs` return `workspace_id`, `items`, and `page`. Results are sorted newest first in a stable order. To fetch only some metric types, call `/api/agent/metrics?type=...` once per type.
 
 The database also exposes read-only SQL views for internal agent/reporting queries:
 

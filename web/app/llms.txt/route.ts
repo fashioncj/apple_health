@@ -1,3 +1,5 @@
+export const dynamic = "force-static";
+
 import { absoluteUrl, APP_STORE_URL } from "@/lib/site";
 import { guides } from "@/lib/docs";
 
@@ -6,6 +8,8 @@ const content = `# HealthSync
 > HealthSync is an iPhone app that syncs selected Apple Health data from HealthKit to hosted HealthSync storage or a backend the user controls.
 
 HealthSync is a data sync utility, not a medical device. It does not provide medical advice, diagnosis, or treatment.
+
+Canonical website: ${absoluteUrl("/")}
 
 ## Setup and agent documentation
 
@@ -31,7 +35,7 @@ ${guides.map((guide) => `- [${guide.title}](${absoluteUrl(`/docs/${guide.slug}/i
 - Hosted agents use the complete private agent endpoint and a separate read-only agent token. Preserve any URL path prefix.
 - Never request database credentials or ingest tokens for a read-only agent integration.
 
-Last reviewed: 2026-10-17
+Last reviewed: 2026-10-22
 `;
 
 export function GET() {

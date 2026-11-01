@@ -27,7 +27,7 @@ const summaryItems = [
   {
     term: "Website data",
     detail:
-      "The website does not collect Apple Health data or personal details. Support messages are sent by email only when you choose to contact us."
+      "The website does not collect Apple Health data. Cloudflare Web Analytics measures website visits and performance without cookies or cross-site tracking. Support messages are sent by email only when you choose to contact us."
   }
 ];
 
@@ -206,6 +206,11 @@ export default function PrivacyPage() {
               control. If you choose hosted HealthSync storage, selected data is stored in a
               workspace scoped to your tokens and made available through private token-protected
               endpoints.
+            </p>
+            <p>
+              The public website uses Cloudflare Web Analytics to measure page views and loading
+              performance without cookies or cross-site tracking. This website analytics does not
+              access Apple Health data or run inside the iOS app.
             </p>
             <p>
               Support messages you choose to send by email may be stored in the mail service or

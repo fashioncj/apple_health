@@ -28,7 +28,7 @@ HealthSync 早先的无许可证 issue 不能代表现在；本次固定提交�
 - SpO₂ 使用 `unit=fraction`，`0.975` 是 `97.5%`。不做插值，不把相邻测量之间的空白当作正常。不能从稀疏 Apple Watch 样本可靠计算连续缺氧时长或夜间缺氧次数。
 - 心率/呼吸频率是 `count/min`，HRV 是 SDNN，单位 `ms`，不等于 RMSSD。睡眠为原始阶段区间，`value` 为时长秒，`metadata.sleep_stage` 为阶段。
 - JSON 主日期为 UTC ISO8601 毫秒；`metadata.healthbridge.start_epoch_seconds/end_epoch_seconds` 保存原始 Date double 的十进制表示，避免原始亚毫秒信息因格式化丢失。原始时区 metadata（如存在）保留；payload.timezone 是导出时手机时区，不能据此推断所有历史记录的当地时区。
-- 历史回填也逐条读取，已关闭上游的日均值/日总量聚合。
+- 历史回填复用上游 PR #11：默认选择 Original blood oxygen & HRV，血氧和 HRV 保留逐条样本；其他数量指标仍按日汇总，睡眠阶段、类别和运动保留原有明细。也可显式选择 Daily summaries。
 - 游标按类型持久化在 iPhone，不当作服务端时间筛选条件。新增和删除先持久入队，再推进游标，再上传；断电在入队与游标更新之间只会造成重读，由 UUID 去重。
 - 每类型每页最多 1000 条，队列上传每批最多 100 条，每次增量运行最多 20 页。大历史库可能需多次前台增量同步；可用日期范围回填分段导入。历史范围查询仍可能占用较多内存，首次导入建议按天或周分段。
 - iPhone 本地 SQLite 显式 `synchronous=FULL`，文件保护为首次解锁后可访问；令牌保存在 Keychain。本地服务 SQLite 文件与配置为仅当前用户可读写；生产数据库备份和主机磁盘加密由部署者配置。

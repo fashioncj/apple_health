@@ -323,7 +323,7 @@ def persist_sync_payload(
 def list_metrics(
     db: Session,
     *,
-    workspace_id: str | None = None,
+    workspace_id: str,
     device_id: str | None = None,
     metric_type: str | None = None,
     start_at: datetime | None = None,
@@ -331,9 +331,7 @@ def list_metrics(
     limit: int = 100,
     offset: int = 0,
 ) -> MetricListResponse:
-    stmt: Select[tuple[HealthMetricRecord]] = select(HealthMetricRecord)
-    if workspace_id:
-        stmt = stmt.where(HealthMetricRecord.workspace_id == workspace_id)
+    stmt: Select[tuple[HealthMetricRecord]] = select(HealthMetricRecord).where(HealthMetricRecord.workspace_id == workspace_id)
     if device_id:
         stmt = stmt.where(HealthMetricRecord.device_id == device_id)
     if metric_type:
@@ -343,11 +341,12 @@ def list_metrics(
     if end_at:
         stmt = stmt.where(HealthMetricRecord.end_at <= end_at)
 
-    records = db.scalars(stmt.order_by(desc(HealthMetricRecord.start_at)).limit(limit + 1).offset(offset)).all()
+    records = db.scalars(stmt.order_by(desc(HealthMetricRecord.start_at), HealthMetricRecord.device_id, HealthMetricRecord.id).limit(limit + 1).offset(offset)).all()
     has_more = len(records) > limit
     page_records = records[:limit]
     timezone_lookup = load_batch_timezones(db, page_records)
     return MetricListResponse(
+        workspace_id=workspace_id,
         items=[metric_record_to_schema(record, timezone_lookup) for record in page_records],
         page=PageInfo(limit=limit, offset=offset, has_more=has_more),
     )
@@ -379,7 +378,7 @@ def list_metric_summary_items(
 def list_workouts(
     db: Session,
     *,
-    workspace_id: str | None = None,
+    workspace_id: str,
     device_id: str | None = None,
     activity_type: str | None = None,
     start_at: datetime | None = None,
@@ -387,9 +386,7 @@ def list_workouts(
     limit: int = 100,
     offset: int = 0,
 ) -> WorkoutListResponse:
-    stmt: Select[tuple[HealthWorkoutRecord]] = select(HealthWorkoutRecord)
-    if workspace_id:
-        stmt = stmt.where(HealthWorkoutRecord.workspace_id == workspace_id)
+    stmt: Select[tuple[HealthWorkoutRecord]] = select(HealthWorkoutRecord).where(HealthWorkoutRecord.workspace_id == workspace_id)
     if device_id:
         stmt = stmt.where(HealthWorkoutRecord.device_id == device_id)
     if activity_type:
@@ -399,11 +396,12 @@ def list_workouts(
     if end_at:
         stmt = stmt.where(HealthWorkoutRecord.end_at <= end_at)
 
-    records = db.scalars(stmt.order_by(desc(HealthWorkoutRecord.start_at)).limit(limit + 1).offset(offset)).all()
+    records = db.scalars(stmt.order_by(desc(HealthWorkoutRecord.start_at), HealthWorkoutRecord.device_id, HealthWorkoutRecord.id).limit(limit + 1).offset(offset)).all()
     has_more = len(records) > limit
     page_records = records[:limit]
     timezone_lookup = load_batch_timezones(db, page_records)
     return WorkoutListResponse(
+        workspace_id=workspace_id,
         items=[workout_record_to_schema(record, timezone_lookup) for record in page_records],
         page=PageInfo(limit=limit, offset=offset, has_more=has_more),
     )
@@ -432,16 +430,14 @@ def list_workout_summary_items(
 def list_sync_batches(
     db: Session,
     *,
-    workspace_id: str | None = None,
+    workspace_id: str,
     device_id: str | None = None,
     start_at: datetime | None = None,
     end_at: datetime | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> SyncBatchListResponse:
-    stmt: Select[tuple[SyncBatchRecord]] = select(SyncBatchRecord)
-    if workspace_id:
-        stmt = stmt.where(SyncBatchRecord.workspace_id == workspace_id)
+    stmt: Select[tuple[SyncBatchRecord]] = select(SyncBatchRecord).where(SyncBatchRecord.workspace_id == workspace_id)
     if device_id:
         stmt = stmt.where(SyncBatchRecord.device_id == device_id)
     if start_at:
@@ -449,10 +445,11 @@ def list_sync_batches(
     if end_at:
         stmt = stmt.where(SyncBatchRecord.date_range_start <= end_at)
 
-    records = db.scalars(stmt.order_by(desc(SyncBatchRecord.received_at)).limit(limit + 1).offset(offset)).all()
+    records = db.scalars(stmt.order_by(desc(SyncBatchRecord.received_at), SyncBatchRecord.export_id).limit(limit + 1).offset(offset)).all()
     has_more = len(records) > limit
     page_records = records[:limit]
     return SyncBatchListResponse(
+        workspace_id=workspace_id,
         items=[sync_batch_record_to_schema(record) for record in page_records],
         page=PageInfo(limit=limit, offset=offset, has_more=has_more),
     )

@@ -2,9 +2,9 @@
 
 Date: 2026-06-05
 
-Target site: https://healthysync.megabyte.sh
+Target site: https://healthysync.app
 
-Primary link target: https://healthysync.megabyte.sh/apple-health-app-sync
+Primary link target: https://healthysync.app/apple-health-app-sync
 
 Primary query family:
 
@@ -500,3 +500,11 @@ Evidence needed before the Codex goal can be completed:
 - Current Google SERP screenshot or export showing the target page on page 1 for at least one agreed primary query.
 - Search Console impressions/clicks for the target query family.
 - Completed or explicitly rejected submissions from the priority list above.
+
+
+## chore(seo): migrate the canonical website to healthysync.app
+
+As of 2026-10-22, use https://healthysync.app for new listings and outreach, and
+https://healthysync.app/apple-health-app-sync for the sync guide. Earlier dated
+entries above are a historical record. Canonical URLs, structured data, sitemap,
+robots discovery, and the AI documentation index now use the new domain.
