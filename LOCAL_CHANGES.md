@@ -33,3 +33,7 @@ PR #11 已合入上游，删除本地“所有历史数量指标强制逐条”�
 ### 2026-11-01：iOS 改为直接采用上游
 
 按用户决定，将 HealthSync、工程和 iOS 测试全部恢复为上游 eaa53fe；之前记录的 iOS 默认值、HTTPS限制、fraction单位、额外metadata、增量分页和本地存储定制已移除，不再维护。保留 CloudBase/Casdoor/MCP 和独立后端。Swift 合成协议验证改为真实上游 percent 格式，并新增后端接收该合成payload的回归测试。历史详情选项须用户显式选择。
+
+### 2026-11-01：官方后端业务逻辑成为线上主体
+
+CloudRun 装配 backend.app.create_app，通过可选 storage_adapter 注入 CloudBaseStorage；官方路由、响应模型、catalog/health-data 组装及汇总函数复用。删除 cloudrun 中重复的业务路由。MCP 通过 OfficialMCPGateway 共用仓储端口，OAuth KV 独立保留。只新增两个健康查询RPC，无搬表或覆盖其他应用。构建上下文通过白名单生成，backend源文件与仓库共用，不维护vendor副本。

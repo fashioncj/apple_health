@@ -3,10 +3,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import hashlib,json,os,secrets,logging
 import httpx
-from fastapi import FastAPI,Depends,Header,HTTPException,Query
+from fastapi import FastAPI,Depends,Header,HTTPException,Query,Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, ValidationError
 from models import Batch
 
 @dataclass(frozen=True)
@@ -62,10 +62,12 @@ class BodyLimit:
 def create_app(settings=None,gateway=None):
     settings=settings or Settings.from_env()
     storage=gateway or Gateway(settings)
+    from official_storage import CloudBaseStorage, OfficialMCPGateway
+    adapter = CloudBaseStorage(storage, settings)
     remote_bundle = None
     if os.environ.get('HEALTH_MCP_ENABLED') == '1':
         from remote_mcp import MCPSettings, create_remote_mcp
-        remote_bundle = create_remote_mcp(storage, MCPSettings.from_env())
+        remote_bundle = create_remote_mcp(OfficialMCPGateway(adapter), MCPSettings.from_env())
     @asynccontextmanager
     async def lifespan(app):
         try:
@@ -78,7 +80,28 @@ def create_app(settings=None,gateway=None):
             if remote_bundle:
                 await remote_bundle[2].client.aclose()
             if hasattr(storage,'close'):await storage.close()
-    app=FastAPI(title='Health Bridge',version='2.0',docs_url=None,redoc_url=None,openapi_url=None,lifespan=lifespan)
+    from backend.app import create_app as create_official_app
+    from backend.config import Settings as OfficialSettings
+    from official_storage import CloudBaseStorage
+    official_settings = OfficialSettings(database_url='', api_token=settings.upload_token,
+        read_token=settings.read_token, token_hash_secret='unused-with-cloudbase-port', hosted_public_base_url='')
+    async def validate_upload(request: Request):
+        if request.url.path == '/api/apple-health/sync':
+            adapter.resolve_auth(request.headers.get('Authorization'), 'ingest')
+            try:
+                Batch.model_validate(await request.json())
+            except ValidationError as exc:
+                raise RequestValidationError([{**e, 'loc': ('body', *e['loc'])} for e in exc.errors()]) from None
+            except (ValueError, TypeError):
+                raise HTTPException(422, 'Invalid request payload') from None
+    app = create_official_app(official_settings, storage_adapter=adapter,
+                              request_dependencies=[Depends(validate_upload)])
+    app.router.lifespan_context = lifespan
+    app.docs_url = app.redoc_url = app.openapi_url = None
+    # Keep API docs disabled and preserve existing single-owner service exposure.
+    app.router.routes = [route for route in app.router.routes
+                         if getattr(route, 'path', '') not in ('/docs', '/redoc', '/openapi.json', '/docs/oauth2-redirect')
+                         and not getattr(route, 'path', '').startswith('/api/hosted/')]
     app.add_middleware(BodyLimit)
 
     @app.exception_handler(RequestValidationError)
@@ -95,46 +118,11 @@ def create_app(settings=None,gateway=None):
         logging.getLogger('healthbridge.validation').warning('Rejected request fields: %s', json.dumps(errors))
         return JSONResponse({'detail':'Invalid request payload','errors':errors},status_code=422)
 
-    def check(value,expected):
-        if not value or not value.startswith('Bearer '):raise HTTPException(401,'Bearer token required')
-        if not secrets.compare_digest(value[7:].encode(),expected.encode()):raise HTTPException(403,'Token rejected')
-    def ingest_auth(authorization:str|None=Header(None)):check(authorization,settings.upload_token)
-    def read_auth(authorization:str|None=Header(None)):check(authorization,settings.read_token)
-
-    @app.get('/health')
-    def health():return {'ok':True}
-
     @app.get('/ready')
     async def ready():
         await storage.rpc('healthbridge_read',{'p_kind':'metric','p_limit':1})
         return {'ok':True}
 
-    @app.post('/api/apple-health/sync',dependencies=[Depends(ingest_auth)])
-    async def sync(batch:Batch):
-        data=batch.model_dump(mode='json')
-        digest=hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
-        result=await storage.rpc('healthbridge_ingest',{'p_batch':data,'p_hash':digest})
-        if result.get('ok') is not True or any(not isinstance(result.get(k),int) for k in ['received','duplicates','deleted']):
-            raise HTTPException(503,'Invalid storage acknowledgement')
-        return {k:result[k] for k in ['ok','received','duplicates','deleted']}
-
-    async def read(kind,typ,start,end,limit,offset):
-        if start is not None and end is not None and start>=end:raise HTTPException(422,'Ordered date range required')
-        result=await storage.rpc('healthbridge_read',{'p_kind':kind,'p_type':typ,'p_from':start.isoformat() if start else None,'p_to':end.isoformat() if end else None,'p_limit':limit,'p_offset':offset})
-        if not isinstance(result.get('items'),list) or not isinstance(result.get('page'),dict):raise HTTPException(503,'Invalid storage response')
-        return result
-
-    @app.get('/api/agent/metrics',dependencies=[Depends(read_auth)])
-    async def metrics(metric_type:str|None=Query(None,alias='type',max_length=100),start:AwareDatetime|None=Query(None,alias='from'),to:AwareDatetime|None=None,limit:int=Query(100,ge=1,le=500),offset:int=Query(0,ge=0)):
-        return await read('metric',metric_type,start,to,limit,offset)
-
-    @app.get('/api/agent/workouts',dependencies=[Depends(read_auth)])
-    async def workouts(activity_type:str|None=Query(None,max_length=100),start:AwareDatetime|None=Query(None,alias='from'),to:AwareDatetime|None=None,limit:int=Query(100,ge=1,le=500),offset:int=Query(0,ge=0)):
-        return await read('workout',activity_type,start,to,limit,offset)
-
-    @app.get('/api/agent/syncs',dependencies=[Depends(read_auth)])
-    async def syncs(start:AwareDatetime|None=Query(None,alias='from'),to:AwareDatetime|None=None,limit:int=Query(100,ge=1,le=500),offset:int=Query(0,ge=0)):
-        return await read('sync',None,start,to,limit,offset)
     if remote_bundle:
         app.mount('/', remote_bundle[1])
     return app

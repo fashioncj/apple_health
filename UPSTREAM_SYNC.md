@@ -41,3 +41,7 @@ sh scripts/sync_upstream.sh
 ## IPA 命名约定
 
 后续每次编译交付 IPA，文件名必须包含应用版本号和构建号，例如 `HealthBridge-1.0.0-build12-unsigned.ipa`。版本与构建号从编译产物 Info.plist 的 CFBundleShortVersionString、CFBundleVersion 读取，避免文件名与实际版本不一致。
+
+## 官方后端适配维护基线
+
+重构分支为 refactor/cloudbase-official-backend。该分支尚未进入 main 时，每日任务在临时克隆中以 origin/refactor/cloudbase-official-backend 为基线，使用 SYNC_BASE_REF 和 SYNC_BRANCH_PREFIX=sync/official-backend 运行脚本；main 包含该分支后恢复 main 为基线。重点验证官方 app/schemas/repository/auth 与 CloudBase port 的契约，不再维护平行 HTTP 业务路由。

@@ -6,3 +6,6 @@
 !requirements.txt
 !remote_mcp.py
 !oauth_store.py
+!official_storage.py
+!backend/
+!backend/**

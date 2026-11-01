@@ -10,17 +10,19 @@ git clone --quiet --no-tags "$origin" "$tmp/repo"
 cd "$tmp/repo"
 git remote add upstream "$upstream"
 git fetch --quiet --no-tags upstream main
+base_ref=${SYNC_BASE_REF:-origin/main}
+git rev-parse --verify "$base_ref^{commit}" >/dev/null
 sha=$(git rev-parse upstream/main)
-if git merge-base --is-ancestor "$sha" origin/main; then
+if git merge-base --is-ancestor "$sha" "$base_ref"; then
     echo 'Upstream already integrated; no changes.'
     exit 0
 fi
-branch="sync/upstream-$sha"
+branch="${SYNC_BRANCH_PREFIX:-sync/upstream}-$sha"
 if test -n "$(git ls-remote --heads origin "refs/heads/$branch")"; then
     echo "Existing candidate: $branch"
     exit 0
 fi
-git switch --quiet -c "$branch" origin/main
+git switch --quiet -c "$branch" "$base_ref"
 if ! git -c user.name='HealthBridge Sync' -c user.email='healthbridge-sync@users.noreply.github.com' merge --no-edit --no-ff upstream/main; then
     echo 'Upstream merge conflict; no branch pushed and main unchanged.' >&2
     exit 2

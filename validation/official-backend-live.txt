@@ -1,0 +1,6 @@
+health-sync-api-007 normal, 100% traffic
+Migration 20261101170000 confirmed
+Real PG synthetic persistence/pagination/device filter/digest/token separation: PASS
+Public synthetic upload/retry/read/paging/digest/token isolation/MCP 401: PASS
+Synthetic samples cleanup: PASS
+Existing ChatGPT OAuth MCP health_sync_status on synthetic 2050 window: PASS
